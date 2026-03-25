@@ -204,6 +204,9 @@ void MainComponent::selectTrack(int index)
     openEditorButton.setEnabled(track.plugin != nullptr);
     testNoteButton.setEnabled(track.plugin != nullptr);
 
+    // Reset plugin selector so user can load a plugin on this track
+    pluginSelector.setSelectedId(1, juce::dontSendNotification);
+
     closePluginEditor();
     updateStatusLabel();
 }
