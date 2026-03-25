@@ -19,7 +19,6 @@ public:
 
     void closeButtonPressed() override
     {
-        // Notify owner to properly destroy editor + window (prevents dangling content pointer)
         if (closeCallback)
             closeCallback();
     }
@@ -43,7 +42,11 @@ private:
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;
 
-    // UI
+    // UI — MIDI
+    juce::ComboBox midiInputSelector;
+    juce::TextButton midiRefreshButton { "Refresh" };
+
+    // UI — Plugin
     juce::ComboBox pluginSelector;
     juce::TextButton openEditorButton   { "Open Editor" };
     juce::TextButton testNoteButton     { "Play Test Note" };
@@ -56,6 +59,14 @@ private:
 
     // Plugin descriptions (indexed by combo box)
     juce::Array<juce::PluginDescription> pluginDescriptions;
+
+    // MIDI device tracking
+    juce::Array<juce::MidiDeviceInfo> midiDevices;
+    juce::String currentMidiDeviceId;
+
+    void scanMidiDevices();
+    void selectMidiDevice();
+    void disableCurrentMidiDevice();
 
     void scanPlugins();
     void loadSelectedPlugin();
