@@ -3,6 +3,9 @@
 TrackComponent::TrackComponent(int trackIndex)
     : index(trackIndex)
 {
+    // Make clicking anywhere on the track label/plugin label area select the track
+    setInterceptsMouseClicks(true, true);
+
     addAndMakeVisible(armButton);
     armButton.setClickingTogglesState(true);
     armButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red.darker());
@@ -11,14 +14,18 @@ TrackComponent::TrackComponent(int trackIndex)
             onArmChanged(index, armButton.getToggleState());
     };
 
-    addAndMakeVisible(trackLabel);
-    trackLabel.setText("Trk" + juce::String(index + 1), juce::dontSendNotification);
-    trackLabel.setFont(juce::Font(12.0f, juce::Font::bold));
+    addAndMakeVisible(selectButton);
+    selectButton.setButtonText("Trk" + juce::String(index + 1));
+    selectButton.onClick = [this] {
+        if (onSelected)
+            onSelected(index);
+    };
 
     addAndMakeVisible(pluginLabel);
     pluginLabel.setText("----", juce::dontSendNotification);
     pluginLabel.setFont(juce::Font(11.0f));
     pluginLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+    pluginLabel.setInterceptsMouseClicks(false, false);
 
     addAndMakeVisible(volumeSlider);
     volumeSlider.setRange(0.0, 1.0, 0.01);
@@ -64,7 +71,7 @@ void TrackComponent::resized()
 
     armButton.setBounds(area.removeFromLeft(22));
     area.removeFromLeft(2);
-    trackLabel.setBounds(area.removeFromLeft(35));
+    selectButton.setBounds(area.removeFromLeft(42));
     pluginLabel.setBounds(area.removeFromLeft(70));
     muteButton.setBounds(area.removeFromRight(22));
     area.removeFromRight(2);

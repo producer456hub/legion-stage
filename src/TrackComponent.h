@@ -30,7 +30,7 @@ private:
     bool selected = false;
 
     juce::TextButton armButton { "A" };
-    juce::Label trackLabel;
+    juce::TextButton selectButton;
     juce::Label pluginLabel;
     juce::Slider volumeSlider;
     juce::TextButton muteButton { "M" };
