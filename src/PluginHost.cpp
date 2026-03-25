@@ -4,7 +4,6 @@ PluginHost::PluginHost()
 {
     formatManager.addFormat(new juce::VST3PluginFormat());
 
-    // Init track structs
     for (int i = 0; i < NUM_TRACKS; ++i)
     {
         tracks[static_cast<size_t>(i)].index = i;
@@ -31,18 +30,25 @@ void PluginHost::setupGraph()
         std::make_unique<AudioProcessorGraph::AudioGraphIOProcessor>(
             AudioProcessorGraph::AudioGraphIOProcessor::audioOutputNode));
 
-    // Create gain nodes for all 16 tracks
     for (int i = 0; i < NUM_TRACKS; ++i)
     {
+        auto& track = tracks[static_cast<size_t>(i)];
+
+        // Gain node
         auto gainProc = std::make_unique<GainProcessor>();
         gainProc->soloCount = &soloCount;
-        tracks[static_cast<size_t>(i)].gainProcessor = gainProc.get();
-        tracks[static_cast<size_t>(i)].gainNode = addNode(std::move(gainProc));
+        track.gainProcessor = gainProc.get();
+        track.gainNode = addNode(std::move(gainProc));
 
-        // Connect gain node outputs to audio output (summing)
+        // ClipPlayer node
+        auto clipProc = std::make_unique<ClipPlayerNode>(engine);
+        track.clipPlayer = clipProc.get();
+        track.clipPlayerNode = addNode(std::move(clipProc));
+
+        // Gain -> audio output
         for (int ch = 0; ch < 2; ++ch)
         {
-            addConnection({ { tracks[static_cast<size_t>(i)].gainNode->nodeID, ch },
+            addConnection({ { track.gainNode->nodeID, ch },
                             { audioOutputNode->nodeID, ch } });
         }
     }
@@ -105,7 +111,6 @@ void PluginHost::unloadPlugin(int trackIndex)
     auto& track = tracks[static_cast<size_t>(trackIndex)];
     if (track.pluginNode == nullptr) return;
 
-    // Remove connections to/from plugin node
     auto connections = getConnections();
     for (auto& conn : connections)
     {
@@ -124,9 +129,13 @@ void PluginHost::unloadPlugin(int trackIndex)
 void PluginHost::connectTrackAudio(int trackIndex)
 {
     auto& track = tracks[static_cast<size_t>(trackIndex)];
-    if (track.pluginNode == nullptr || track.gainNode == nullptr) return;
+    if (track.pluginNode == nullptr) return;
 
-    // Plugin stereo out -> gain node stereo in
+    // ClipPlayer MIDI -> Plugin MIDI
+    addConnection({ { track.clipPlayerNode->nodeID, AudioProcessorGraph::midiChannelIndex },
+                    { track.pluginNode->nodeID, AudioProcessorGraph::midiChannelIndex } });
+
+    // Plugin audio -> Gain
     for (int ch = 0; ch < 2; ++ch)
     {
         addConnection({ { track.pluginNode->nodeID, ch },
@@ -143,7 +152,7 @@ void PluginHost::setSelectedTrack(int index)
 
 void PluginHost::updateMidiRouting()
 {
-    // Remove all MIDI connections from the MIDI input node
+    // Remove all MIDI connections from MIDI input node
     auto connections = getConnections();
     for (auto& conn : connections)
     {
@@ -154,13 +163,10 @@ void PluginHost::updateMidiRouting()
         }
     }
 
-    // Connect MIDI to selected track's plugin (if it has one)
+    // Connect MIDI input to selected track's ClipPlayerNode
     auto& track = tracks[static_cast<size_t>(selectedTrack)];
-    if (track.pluginNode != nullptr)
-    {
-        addConnection({ { midiInputNode->nodeID, AudioProcessorGraph::midiChannelIndex },
-                        { track.pluginNode->nodeID, AudioProcessorGraph::midiChannelIndex } });
-    }
+    addConnection({ { midiInputNode->nodeID, AudioProcessorGraph::midiChannelIndex },
+                    { track.clipPlayerNode->nodeID, AudioProcessorGraph::midiChannelIndex } });
 }
 
 void PluginHost::sendTestNoteOn(int noteNumber, float velocity)
@@ -180,5 +186,9 @@ void PluginHost::sendTestNoteOff(int noteNumber)
 void PluginHost::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     midiCollector.removeNextBlockOfMessages(midiMessages, buffer.getNumSamples());
+
+    // Advance transport
+    engine.advancePosition(buffer.getNumSamples(), storedSampleRate);
+
     AudioProcessorGraph::processBlock(buffer, midiMessages);
 }
