@@ -11,6 +11,8 @@ juce_add_gui_app(Sequencer
     COMPANY_NAME "Dev"
 )
 
+juce_generate_juce_header(Sequencer)
+
 target_sources(Sequencer PRIVATE
     src/Main.cpp
     src/MainComponent.h
