@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "PluginHost.h"
+#include "TrackComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -19,8 +20,7 @@ public:
 
     void closeButtonPressed() override
     {
-        if (closeCallback)
-            closeCallback();
+        if (closeCallback) closeCallback();
     }
 
 private:
@@ -42,22 +42,26 @@ private:
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;
 
-    // UI — MIDI
+    // UI — top controls
     juce::ComboBox midiInputSelector;
     juce::TextButton midiRefreshButton { "Refresh" };
-
-    // UI — Plugin
     juce::ComboBox pluginSelector;
     juce::TextButton openEditorButton   { "Open Editor" };
     juce::TextButton testNoteButton     { "Play Test Note" };
     juce::TextButton audioSettingsButton { "Audio Settings" };
     juce::Label statusLabel;
 
+    // Track list
+    juce::OwnedArray<TrackComponent> trackComponents;
+    juce::Viewport trackViewport;
+    juce::Component trackListContainer;
+    int selectedTrackIndex = 0;
+
     // Plugin editor window
     std::unique_ptr<juce::AudioProcessorEditor> currentEditor;
     std::unique_ptr<PluginEditorWindow> editorWindow;
 
-    // Plugin descriptions (indexed by combo box)
+    // Plugin descriptions
     juce::Array<juce::PluginDescription> pluginDescriptions;
 
     // MIDI device tracking
@@ -75,6 +79,12 @@ private:
     void playTestNote();
     void showAudioSettings();
     void updateStatusLabel();
+
+    void selectTrack(int index);
+    void onTrackVolumeChanged(int trackIndex, float volume);
+    void onTrackMuteChanged(int trackIndex, bool muted);
+    void onTrackSoloChanged(int trackIndex, bool soloed);
+    void setupTrackList();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
