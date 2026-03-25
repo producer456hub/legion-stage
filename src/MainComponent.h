@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <set>
 #include "PluginHost.h"
 #include "TrackComponent.h"
 
@@ -32,8 +33,18 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
+    bool keyPressed(const juce::KeyPress& key) override;
+    bool keyStateChanged(bool isKeyDown) override;
 
 private:
+    // Computer keyboard MIDI
+    bool useComputerKeyboard = false;
+    int computerKeyboardOctave = 4;  // C4 = middle C
+    std::set<int> keysCurrentlyDown;  // track which keys are held
+    int keyToNote(int keyCode) const;
+    void sendNoteOn(int note);
+    void sendNoteOff(int note);
+
     juce::AudioDeviceManager deviceManager;
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;

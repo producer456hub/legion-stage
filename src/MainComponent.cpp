@@ -248,7 +248,8 @@ void MainComponent::scanMidiDevices()
     midiInputSelector.clear(juce::dontSendNotification);
     midiDevices = juce::MidiInput::getAvailableDevices();
     midiInputSelector.addItem("-- No MIDI --", 1);
-    int id = 2;
+    midiInputSelector.addItem("Computer Keyboard", 2);
+    int id = 3;
     for (const auto& d : midiDevices) midiInputSelector.addItem(d.name, id++);
     midiInputSelector.setSelectedId(1, juce::dontSendNotification);
 }
@@ -256,7 +257,21 @@ void MainComponent::scanMidiDevices()
 void MainComponent::selectMidiDevice()
 {
     disableCurrentMidiDevice();
-    int idx = midiInputSelector.getSelectedId() - 2;
+    useComputerKeyboard = false;
+
+    int selectedId = midiInputSelector.getSelectedId();
+
+    if (selectedId == 2)
+    {
+        // Computer keyboard mode
+        useComputerKeyboard = true;
+        setWantsKeyboardFocus(true);
+        grabKeyboardFocus();
+        updateStatusLabel();
+        return;
+    }
+
+    int idx = selectedId - 3;
     if (idx < 0 || idx >= midiDevices.size()) { updateStatusLabel(); return; }
     auto& d = midiDevices[idx];
     deviceManager.setMidiInputDeviceEnabled(d.identifier, true);
@@ -375,7 +390,9 @@ void MainComponent::updateStatusLabel()
     juce::String text = "Track " + juce::String(selectedTrackIndex + 1) + " | ";
     auto& track = pluginHost.getTrack(selectedTrackIndex);
     text += (track.plugin ? "Loaded: " + track.plugin->getName() : juce::String("No plugin")) + " | ";
-    if (currentMidiDeviceId.isNotEmpty())
+    if (useComputerKeyboard)
+        text += "MIDI: Computer KB (Oct " + juce::String(computerKeyboardOctave) + ") | ";
+    else if (currentMidiDeviceId.isNotEmpty())
         for (const auto& d : midiDevices)
             if (d.identifier == currentMidiDeviceId) { text += "MIDI: " + d.name + " | "; break; }
     if (auto* dev = deviceManager.getCurrentAudioDevice())
@@ -455,4 +472,95 @@ void MainComponent::resized()
             clipButtons[idx]->setBounds(s * 50, t * trackHeight + 2, 46, trackHeight - 4);
         }
     }
+}
+
+// ── Computer Keyboard MIDI ───────────────────────────────────────────────────
+
+int MainComponent::keyToNote(int keyCode) const
+{
+    // QWERTY layout:
+    // Black keys: W E   T Y U   O P
+    // White keys: A S D F G H J K L
+    // Z = octave down, X = octave up
+    switch (keyCode)
+    {
+        case 'A': return 0;   // C
+        case 'W': return 1;   // C#
+        case 'S': return 2;   // D
+        case 'E': return 3;   // D#
+        case 'D': return 4;   // E
+        case 'F': return 5;   // F
+        case 'T': return 6;   // F#
+        case 'G': return 7;   // G
+        case 'Y': return 8;   // G#
+        case 'H': return 9;   // A
+        case 'U': return 10;  // A#
+        case 'J': return 11;  // B
+        case 'K': return 12;  // C (next octave)
+        case 'O': return 13;  // C#
+        case 'L': return 14;  // D
+        case 'P': return 15;  // D#
+        default: return -1;
+    }
+}
+
+void MainComponent::sendNoteOn(int note)
+{
+    auto msg = juce::MidiMessage::noteOn(1, note, 0.8f);
+    msg.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+    pluginHost.getMidiCollector().addMessageToQueue(msg);
+}
+
+void MainComponent::sendNoteOff(int note)
+{
+    auto msg = juce::MidiMessage::noteOff(1, note);
+    msg.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+    pluginHost.getMidiCollector().addMessageToQueue(msg);
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    if (!useComputerKeyboard) return false;
+
+    int keyCode = key.getTextCharacter();
+    if (keyCode >= 'a' && keyCode <= 'z') keyCode -= 32; // uppercase
+
+    // Octave shift
+    if (keyCode == 'Z') { computerKeyboardOctave = juce::jmax(0, computerKeyboardOctave - 1); updateStatusLabel(); return true; }
+    if (keyCode == 'X') { computerKeyboardOctave = juce::jmin(8, computerKeyboardOctave + 1); updateStatusLabel(); return true; }
+
+    return false; // let keyStateChanged handle note keys
+}
+
+bool MainComponent::keyStateChanged(bool /*isKeyDown*/)
+{
+    if (!useComputerKeyboard) return false;
+
+    // Check all mapped keys and compare with tracked state
+    const int mappedKeys[] = { 'A','W','S','E','D','F','T','G','Y','H','U','J','K','O','L','P' };
+
+    for (int keyCode : mappedKeys)
+    {
+        bool isDown = juce::KeyPress::isKeyCurrentlyDown(keyCode);
+        int semitone = keyToNote(keyCode);
+        if (semitone < 0) continue;
+
+        int midiNote = (computerKeyboardOctave * 12) + semitone;
+        if (midiNote < 0 || midiNote > 127) continue;
+
+        bool wasDown = keysCurrentlyDown.count(keyCode) > 0;
+
+        if (isDown && !wasDown)
+        {
+            keysCurrentlyDown.insert(keyCode);
+            sendNoteOn(midiNote);
+        }
+        else if (!isDown && wasDown)
+        {
+            keysCurrentlyDown.erase(keyCode);
+            sendNoteOff(midiNote);
+        }
+    }
+
+    return true;
 }
