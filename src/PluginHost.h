@@ -13,18 +13,20 @@ public:
     const juce::KnownPluginList& getPluginList() const { return knownPluginList; }
 
     // Plugin loading — caller must suspend audio before calling
-    // Returns true on success, false on failure (errorMsg set)
     bool loadPlugin(const juce::PluginDescription& desc, juce::String& errorMsg);
     void unloadPlugin();
 
     // Current plugin access (for editor creation)
     juce::AudioProcessor* getCurrentPlugin() const { return currentPlugin; }
 
-    // MIDI injection for test notes
+    // MIDI — collector receives MIDI from device callbacks and test notes
+    juce::MidiMessageCollector& getMidiCollector() { return midiCollector; }
+
+    // Test note injection (goes through the collector)
     void sendTestNoteOn(int noteNumber = 60, float velocity = 0.78f);
     void sendTestNoteOff(int noteNumber = 60);
 
-    // Override processBlock to inject pending MIDI
+    // Override processBlock to pull MIDI from collector
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) override;
 
     // Store audio params for plugin init during swaps
@@ -42,9 +44,8 @@ private:
     // Current loaded plugin (raw ptr — graph owns it via the node)
     juce::AudioProcessor* currentPlugin = nullptr;
 
-    // MIDI injection
-    juce::MidiBuffer pendingMidi;
-    juce::SpinLock midiLock;
+    // MIDI collector — receives from device callbacks + test notes
+    juce::MidiMessageCollector midiCollector;
 
     // Stored audio params
     double storedSampleRate = 44100.0;
