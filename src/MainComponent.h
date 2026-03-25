@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <set>
 #include "PluginHost.h"
+#include "PianoRollComponent.h"
 #include "TrackComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow

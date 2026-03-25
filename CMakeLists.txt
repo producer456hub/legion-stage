@@ -28,6 +28,8 @@ target_sources(Sequencer PRIVATE
     src/ClipPlayerNode.cpp
     src/SequencerEngine.h
     src/SequencerEngine.cpp
+    src/PianoRollComponent.h
+    src/PianoRollComponent.cpp
 )
 
 target_compile_definitions(Sequencer PRIVATE

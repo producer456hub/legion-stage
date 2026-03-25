@@ -141,6 +141,23 @@ void MainComponent::setupClipGrid()
         {
             auto* btn = new juce::TextButton("");
             btn->onClick = [this, t, s] { onClipButtonClicked(t, s); };
+            // Right-click opens piano roll editor
+            btn->onStateChange = [this, btn, t, s] {
+                if (btn->isDown() && juce::ModifierKeys::currentModifiers.isRightButtonDown())
+                {
+                    auto* cp = pluginHost.getTrack(t).clipPlayer;
+                    if (cp != nullptr)
+                    {
+                        auto& slot = cp->getSlot(s);
+                        if (slot.clip != nullptr)
+                        {
+                            // PianoRollWindow deletes itself on close
+                            new PianoRollWindow("Piano Roll - Track " + juce::String(t + 1)
+                                + " Slot " + juce::String(s + 1), *slot.clip);
+                        }
+                    }
+                }
+            };
             clipGridContainer.addAndMakeVisible(btn);
             clipButtons.add(btn);
         }
