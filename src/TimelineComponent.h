@@ -35,9 +35,9 @@ private:
     // View state
     double scrollX = 0.0;
     double pixelsPerBeat = 40.0;
-    int trackHeight = 56;      // taller for touch-friendly buttons
-    int headerHeight = 24;
-    int trackLabelWidth = 120;  // compact — track name with M/S integrated
+    int trackHeight = 72;      // tall enough for finger-sized buttons
+    int headerHeight = 28;
+    int trackLabelWidth = 140;  // room for track name + M/S buttons
     double gridResolution = 0.25; // beats per grid line (0.25 = 1/16, 0.5 = 1/8, 1.0 = 1/4)
 
 public:

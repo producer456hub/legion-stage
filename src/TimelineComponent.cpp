@@ -726,20 +726,20 @@ void TimelineComponent::drawTrackLanes(juce::Graphics& g)
 juce::Rectangle<int> TimelineComponent::getSelectButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    return { 2, y + 2, trackLabelWidth - 28, trackHeight - 4 };
+    return { 2, y + 2, trackLabelWidth - 40, trackHeight - 4 };
 }
 
 juce::Rectangle<int> TimelineComponent::getMuteButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    return { trackLabelWidth - 24, y + 2, 22, (trackHeight - 6) / 2 };
+    return { trackLabelWidth - 36, y + 3, 34, (trackHeight - 8) / 2 };
 }
 
 juce::Rectangle<int> TimelineComponent::getSoloButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    int halfH = (trackHeight - 6) / 2;
-    return { trackLabelWidth - 24, y + 2 + halfH + 2, 22, halfH };
+    int halfH = (trackHeight - 8) / 2;
+    return { trackLabelWidth - 36, y + 3 + halfH + 2, 34, halfH };
 }
 
 void TimelineComponent::drawTrackControls(juce::Graphics& g)
@@ -773,7 +773,7 @@ void TimelineComponent::drawTrackControls(juce::Graphics& g)
 
         // Track label
         g.setColour(juce::Colours::white);
-        g.setFont(11.0f);
+        g.setFont(13.0f);
         juce::String label = juce::String(t + 1);
         if (track.plugin != nullptr)
             label += " " + track.plugin->getName().substring(0, 7);
@@ -783,18 +783,18 @@ void TimelineComponent::drawTrackControls(juce::Graphics& g)
         auto muteRect = getMuteButtonRect(t);
         bool isMuted = track.gainProcessor != nullptr && track.gainProcessor->muted.load();
         g.setColour(isMuted ? juce::Colours::red : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(muteRect.toFloat(), 2.0f);
+        g.fillRoundedRectangle(muteRect.toFloat(), 3.0f);
         g.setColour(juce::Colours::white);
-        g.setFont(10.0f);
+        g.setFont(13.0f);
         g.drawText("M", muteRect, juce::Justification::centred);
 
         // Solo button
         auto soloRect = getSoloButtonRect(t);
         bool isSoloed = track.gainProcessor != nullptr && track.gainProcessor->soloed.load();
         g.setColour(isSoloed ? juce::Colours::yellow : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(soloRect.toFloat(), 2.0f);
+        g.fillRoundedRectangle(soloRect.toFloat(), 3.0f);
         g.setColour(isSoloed ? juce::Colours::black : juce::Colours::white);
-        g.setFont(10.0f);
+        g.setFont(13.0f);
         g.drawText("S", soloRect, juce::Justification::centred);
 
         // Divider
