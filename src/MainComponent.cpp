@@ -261,13 +261,14 @@ MainComponent::MainComponent()
         slider->setEnabled(false);
 
         int paramIdx = i; // capture for lambda
-        slider->onValueChange = [this, paramIdx, slider] {
+        slider->onValueChange = [this, slider] {
             auto& track = pluginHost.getTrack(selectedTrackIndex);
             if (track.plugin != nullptr)
             {
+                int realIdx = slider->getProperties().getWithDefault("paramIndex", -1);
                 auto& params = track.plugin->getParameters();
-                if (paramIdx < params.size())
-                    params[paramIdx]->setValue(static_cast<float>(slider->getValue()));
+                if (realIdx >= 0 && realIdx < params.size())
+                    params[realIdx]->setValue(static_cast<float>(slider->getValue()));
             }
         };
 
@@ -579,22 +580,70 @@ void MainComponent::updateParamSliders()
 {
     auto& track = pluginHost.getTrack(selectedTrackIndex);
 
-    auto& params = track.plugin != nullptr ? track.plugin->getParameters() : juce::Array<juce::AudioProcessorParameter*>();
+    if (track.plugin == nullptr)
+    {
+        for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
+        {
+            paramSliders[i]->setEnabled(false);
+            paramSliders[i]->setValue(0.0, juce::dontSendNotification);
+            paramLabels[i]->setText("", juce::dontSendNotification);
+        }
+        return;
+    }
+
+    auto& allParams = track.plugin->getParameters();
+
+    // First, try to find Macro parameters (Arturia plugins)
+    juce::Array<juce::AudioProcessorParameter*> selectedParams;
+
+    for (auto* param : allParams)
+    {
+        juce::String name = param->getName(30).toLowerCase();
+        if (name.contains("macro") || name.contains("mcr") || name.contains("assign"))
+            selectedParams.add(param);
+    }
+
+    // If no macros found, try common useful parameter names
+    if (selectedParams.isEmpty())
+    {
+        for (auto* param : allParams)
+        {
+            juce::String name = param->getName(30).toLowerCase();
+            if (name.contains("cutoff") || name.contains("filter") ||
+                name.contains("resonance") || name.contains("attack") ||
+                name.contains("release") || name.contains("volume") ||
+                name.contains("drive") || name.contains("mix"))
+                selectedParams.add(param);
+
+            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
+        }
+    }
+
+    // If still nothing useful, just use the first N parameters
+    if (selectedParams.isEmpty())
+    {
+        for (int i = 0; i < juce::jmin(NUM_PARAM_SLIDERS, allParams.size()); ++i)
+            selectedParams.add(allParams[i]);
+    }
 
     for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
     {
-        if (i < params.size())
+        if (i < selectedParams.size())
         {
-            auto* param = params[i];
+            auto* param = selectedParams[i];
             paramSliders[i]->setEnabled(true);
             paramSliders[i]->setValue(param->getValue(), juce::dontSendNotification);
             paramLabels[i]->setText(param->getName(12), juce::dontSendNotification);
+
+            // Store the actual parameter index for the slider callback
+            paramSliders[i]->getProperties().set("paramIndex", allParams.indexOf(param));
         }
         else
         {
             paramSliders[i]->setEnabled(false);
             paramSliders[i]->setValue(0.0, juce::dontSendNotification);
             paramLabels[i]->setText("", juce::dontSendNotification);
+            paramSliders[i]->getProperties().set("paramIndex", -1);
         }
     }
 }
