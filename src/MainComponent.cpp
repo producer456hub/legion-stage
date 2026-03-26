@@ -251,6 +251,37 @@ MainComponent::MainComponent()
     trackInfoLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
     trackInfoLabel.setInterceptsMouseClicks(false, false);
 
+    // Plugin parameter sliders
+    for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
+    {
+        auto* slider = new juce::Slider();
+        slider->setRange(0.0, 1.0, 0.001);
+        slider->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        slider->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 14);
+        slider->setEnabled(false);
+
+        int paramIdx = i; // capture for lambda
+        slider->onValueChange = [this, paramIdx, slider] {
+            auto& track = pluginHost.getTrack(selectedTrackIndex);
+            if (track.plugin != nullptr)
+            {
+                auto& params = track.plugin->getParameters();
+                if (paramIdx < params.size())
+                    params[paramIdx]->setValue(static_cast<float>(slider->getValue()));
+            }
+        };
+
+        addAndMakeVisible(slider);
+        paramSliders.add(slider);
+
+        auto* label = new juce::Label();
+        label->setJustificationType(juce::Justification::centred);
+        label->setFont(juce::Font(9.0f));
+        label->setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
+        addAndMakeVisible(label);
+        paramLabels.add(label);
+    }
+
     addAndMakeVisible(statusLabel);
     statusLabel.setJustificationType(juce::Justification::centred);
     statusLabel.setFont(juce::Font(12.0f));
@@ -385,6 +416,8 @@ void MainComponent::updateTrackDisplay()
 
     info += "Armed: " + juce::String(track.clipPlayer && track.clipPlayer->armed.load() ? "Yes" : "No");
     trackInfoLabel.setText(info, juce::dontSendNotification);
+
+    updateParamSliders();
 
 }
 
@@ -538,6 +571,32 @@ void MainComponent::updateStatusLabel()
     if (auto* dev = deviceManager.getCurrentAudioDevice())
         text += dev->getName() + " | " + juce::String(dev->getCurrentSampleRate(), 0) + " Hz";
     statusLabel.setText(text, juce::dontSendNotification);
+}
+
+// ── Plugin Parameters ─────────────────────────────────────────────────────────
+
+void MainComponent::updateParamSliders()
+{
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+
+    auto& params = track.plugin != nullptr ? track.plugin->getParameters() : juce::Array<juce::AudioProcessorParameter*>();
+
+    for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
+    {
+        if (i < params.size())
+        {
+            auto* param = params[i];
+            paramSliders[i]->setEnabled(true);
+            paramSliders[i]->setValue(param->getValue(), juce::dontSendNotification);
+            paramLabels[i]->setText(param->getName(12), juce::dontSendNotification);
+        }
+        else
+        {
+            paramSliders[i]->setEnabled(false);
+            paramSliders[i]->setValue(0.0, juce::dontSendNotification);
+            paramLabels[i]->setText("", juce::dontSendNotification);
+        }
+    }
 }
 
 // ── Save/Load/Undo ───────────────────────────────────────────────────────────
@@ -813,20 +872,17 @@ void MainComponent::drawMiniMixer(juce::Graphics& g)
     if (miniMixerBounds.isEmpty()) return;
 
     auto area = miniMixerBounds;
-    int barWidth = (area.getWidth() - 2) / 16;
-    int barMaxHeight = area.getHeight() - 20;
+    int barWidth = juce::jmax(1, (area.getWidth()) / 16);
+    int barH = area.getHeight();
 
-    // Title
-    g.setColour(juce::Colour(0xff888888));
-    g.setFont(10.0f);
-    g.drawText("MIXER", area.removeFromTop(14), juce::Justification::centred);
-    area.removeFromTop(4);
+    // Background
+    g.setColour(juce::Colour(0xff1e1e1e));
+    g.fillRect(area);
 
     for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
     {
         auto& track = pluginHost.getTrack(t);
-        int x = area.getX() + t * barWidth + 1;
-        int barH = barMaxHeight;
+        int x = area.getX() + t * barWidth;
         float vol = 0.0f;
 
         if (track.gainProcessor)
@@ -835,18 +891,17 @@ void MainComponent::drawMiniMixer(juce::Graphics& g)
             if (track.gainProcessor->muted.load()) vol = 0.0f;
         }
 
-        int filledH = static_cast<int>(vol * barH);
-        int y = area.getY();
+        int filledW = static_cast<int>(vol * (barWidth - 2));
 
-        // Background
-        g.setColour(juce::Colour(0xff2a2a2a));
-        g.fillRect(x, y, barWidth - 1, barH);
-
-        // Level bar
         bool isSelected = (t == selectedTrackIndex);
         bool hasPlugin = (track.plugin != nullptr);
         bool isArmed = track.clipPlayer && track.clipPlayer->armed.load();
 
+        // Background per track
+        g.setColour(juce::Colour(0xff2a2a2a));
+        g.fillRect(x + 1, area.getY() + 1, barWidth - 2, barH - 2);
+
+        // Level fill
         if (isArmed)
             g.setColour(juce::Colours::red.darker());
         else if (isSelected)
@@ -854,21 +909,21 @@ void MainComponent::drawMiniMixer(juce::Graphics& g)
         else if (hasPlugin)
             g.setColour(juce::Colour(0xff448844));
         else
-            g.setColour(juce::Colour(0xff555555));
+            g.setColour(juce::Colour(0xff333333));
 
-        g.fillRect(x, y + barH - filledH, barWidth - 1, filledH);
+        g.fillRect(x + 1, area.getY() + 1, filledW, barH - 2);
 
-        // Border for selected
+        // Selected border
         if (isSelected)
         {
             g.setColour(juce::Colours::white);
-            g.drawRect(x, y, barWidth - 1, barH, 1);
+            g.drawRect(x, area.getY(), barWidth, barH, 1);
         }
 
         // Track number
-        g.setColour(juce::Colour(0xffaaaaaa));
-        g.setFont(8.0f);
-        g.drawText(juce::String(t + 1), x, y + barH + 1, barWidth - 1, 12, juce::Justification::centred);
+        g.setColour(juce::Colour(0xffcccccc));
+        g.setFont(10.0f);
+        g.drawText(juce::String(t + 1), x, area.getY(), barWidth, barH, juce::Justification::centred);
     }
 }
 
@@ -975,13 +1030,30 @@ void MainComponent::resized()
     undoButton.setBounds(undoRow.removeFromLeft(undoRow.getWidth() / 2 - 2));
     undoRow.removeFromLeft(4);
     redoButton.setBounds(undoRow);
-    rightPanel.removeFromTop(12);
+    rightPanel.removeFromTop(8);
 
-    // Mini mixer
-    miniMixerBounds = rightPanel.toNearestInt();
+    // Plugin parameter knobs in remaining right panel space
+    if (paramSliders.size() > 0)
+    {
+        int knobSize = juce::jmin(70, (rightPanel.getWidth() - 8) / 3);
+        for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
+        {
+            int col = i % 3;
+            int row = i / 3;
+            int kx = rightPanel.getX() + col * (knobSize + 4);
+            int ky = rightPanel.getY() + row * (knobSize + 18);
 
-    // ── Timeline fills the entire center ──
+            paramLabels[i]->setBounds(kx, ky, knobSize, 14);
+            paramSliders[i]->setBounds(kx, ky + 14, knobSize, knobSize);
+        }
+    }
+
+    // ── Mini mixer as horizontal strip above timeline ──
     area.reduce(2, 2);
+    miniMixerBounds = area.removeFromTop(30).toNearestInt();
+    area.removeFromTop(2);
+
+    // ── Timeline fills the rest ──
     if (timelineComponent)
         timelineComponent->setBounds(area);
 }
