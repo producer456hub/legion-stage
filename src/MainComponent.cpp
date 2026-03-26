@@ -683,7 +683,7 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
             return; // Don't forward CI SysEx to the audio engine
         }
 
-        // Handle ALL CCs from Keystage — show what's coming in
+        // Handle CCs from Keystage
         if (msg.isController())
         {
             int cc = msg.getControllerNumber();
@@ -694,9 +694,17 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
                     juce::dontSendNotification);
             });
 
-            // Map CC 24-31 to plugin parameters
-            if (cc >= 24 && cc <= 31)
-                midi2Handler.handleCC(cc, val);
+            // Map CCs to plugin parameters and push OLED updates
+            midi2Handler.handleCC(cc, val);
+
+            // Send any pending CI updates to the Keystage
+            auto& ciOut = midi2Handler.getOutgoing();
+            if (!ciOut.isEmpty() && midiOutput)
+            {
+                for (const auto metadata : ciOut)
+                    midiOutput->sendMessageNow(metadata.getMessage());
+                midi2Handler.clearOutgoing();
+            }
         }
     }
 
