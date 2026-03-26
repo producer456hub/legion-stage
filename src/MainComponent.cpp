@@ -245,38 +245,6 @@ MainComponent::MainComponent()
         }
     };
 
-    addAndMakeVisible(prevPresetButton);
-    prevPresetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444455));
-    prevPresetButton.onClick = [this] {
-        auto& track = pluginHost.getTrack(selectedTrackIndex);
-        if (track.plugin == nullptr || presetList.isEmpty()) return;
-
-        currentPresetIndex = juce::jmax(0, currentPresetIndex - 1);
-        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index,
-            &pluginHost.getMidiCollector());
-        presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
-            + " " + presetList[currentPresetIndex].name, juce::dontSendNotification);
-    };
-
-    addAndMakeVisible(nextPresetButton);
-    nextPresetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444455));
-    nextPresetButton.onClick = [this] {
-        auto& track = pluginHost.getTrack(selectedTrackIndex);
-        if (track.plugin == nullptr || presetList.isEmpty()) return;
-
-        currentPresetIndex = juce::jmin(presetList.size() - 1, currentPresetIndex + 1);
-        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index,
-            &pluginHost.getMidiCollector());
-        presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
-            + " " + presetList[currentPresetIndex].name, juce::dontSendNotification);
-    };
-
-    addAndMakeVisible(presetNameLabel);
-    presetNameLabel.setJustificationType(juce::Justification::centred);
-    presetNameLabel.setFont(juce::Font(12.0f));
-    presetNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    presetNameLabel.setColour(juce::Label::backgroundColourId, juce::Colour(0xff333333));
-
     addAndMakeVisible(trackInfoLabel);
     trackInfoLabel.setJustificationType(juce::Justification::topLeft);
     trackInfoLabel.setFont(juce::Font(11.0f));
@@ -413,32 +381,6 @@ void MainComponent::updateTrackDisplay()
     info += "Armed: " + juce::String(track.clipPlayer && track.clipPlayer->armed.load() ? "Yes" : "No");
     trackInfoLabel.setText(info, juce::dontSendNotification);
 
-    // Build preset list
-    presetList = PresetBrowser::getPresets(track.plugin);
-    currentPresetIndex = track.plugin != nullptr ? track.plugin->getCurrentProgram() : -1;
-    if (currentPresetIndex >= presetList.size()) currentPresetIndex = 0;
-
-    if (track.plugin != nullptr && !presetList.isEmpty())
-    {
-        presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
-            + " " + presetList[juce::jmax(0, currentPresetIndex)].name, juce::dontSendNotification);
-        prevPresetButton.setEnabled(true);
-        nextPresetButton.setEnabled(true);
-    }
-    else if (track.plugin != nullptr)
-    {
-        // Show debug info
-        presetNameLabel.setText("Progs:" + juce::String(track.plugin->getNumPrograms())
-            + " P0:" + track.plugin->getProgramName(0), juce::dontSendNotification);
-        prevPresetButton.setEnabled(false);
-        nextPresetButton.setEnabled(false);
-    }
-    else
-    {
-        presetNameLabel.setText("No plugin", juce::dontSendNotification);
-        prevPresetButton.setEnabled(false);
-        nextPresetButton.setEnabled(false);
-    }
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -836,11 +778,88 @@ void MainComponent::loadProject()
 
 // ── Layout ───────────────────────────────────────────────────────────────────
 
+void MainComponent::mouseDown(const juce::MouseEvent& e)
+{
+    // Check if click is in the mini mixer area
+    if (!miniMixerBounds.isEmpty() && miniMixerBounds.contains(e.x, e.y))
+    {
+        int barWidth = (miniMixerBounds.getWidth() - 2) / 16;
+        int trackIdx = (e.x - miniMixerBounds.getX()) / barWidth;
+        if (trackIdx >= 0 && trackIdx < PluginHost::NUM_TRACKS)
+            selectTrack(trackIdx);
+    }
+}
+
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff1a1a1a));
     g.setColour(juce::Colour(0xff333333));
     g.drawHorizontalLine(50, 0, static_cast<float>(getWidth()));
+    drawMiniMixer(g);
+}
+
+void MainComponent::drawMiniMixer(juce::Graphics& g)
+{
+    if (miniMixerBounds.isEmpty()) return;
+
+    auto area = miniMixerBounds;
+    int barWidth = (area.getWidth() - 2) / 16;
+    int barMaxHeight = area.getHeight() - 20;
+
+    // Title
+    g.setColour(juce::Colour(0xff888888));
+    g.setFont(10.0f);
+    g.drawText("MIXER", area.removeFromTop(14), juce::Justification::centred);
+    area.removeFromTop(4);
+
+    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+    {
+        auto& track = pluginHost.getTrack(t);
+        int x = area.getX() + t * barWidth + 1;
+        int barH = barMaxHeight;
+        float vol = 0.0f;
+
+        if (track.gainProcessor)
+        {
+            vol = track.gainProcessor->volume.load();
+            if (track.gainProcessor->muted.load()) vol = 0.0f;
+        }
+
+        int filledH = static_cast<int>(vol * barH);
+        int y = area.getY();
+
+        // Background
+        g.setColour(juce::Colour(0xff2a2a2a));
+        g.fillRect(x, y, barWidth - 1, barH);
+
+        // Level bar
+        bool isSelected = (t == selectedTrackIndex);
+        bool hasPlugin = (track.plugin != nullptr);
+        bool isArmed = track.clipPlayer && track.clipPlayer->armed.load();
+
+        if (isArmed)
+            g.setColour(juce::Colours::red.darker());
+        else if (isSelected)
+            g.setColour(juce::Colour(0xff4488cc));
+        else if (hasPlugin)
+            g.setColour(juce::Colour(0xff448844));
+        else
+            g.setColour(juce::Colour(0xff555555));
+
+        g.fillRect(x, y + barH - filledH, barWidth - 1, filledH);
+
+        // Border for selected
+        if (isSelected)
+        {
+            g.setColour(juce::Colours::white);
+            g.drawRect(x, y, barWidth - 1, barH, 1);
+        }
+
+        // Track number
+        g.setColour(juce::Colour(0xffaaaaaa));
+        g.setFont(8.0f);
+        g.drawText(juce::String(t + 1), x, y + barH + 1, barWidth - 1, 12, juce::Justification::centred);
+    }
 }
 
 void MainComponent::resized()
@@ -948,13 +967,8 @@ void MainComponent::resized()
     redoButton.setBounds(undoRow);
     rightPanel.removeFromTop(12);
 
-    // Preset browser
-    presetNameLabel.setBounds(rightPanel.removeFromTop(24));
-    rightPanel.removeFromTop(4);
-    auto presetRow = rightPanel.removeFromTop(32);
-    prevPresetButton.setBounds(presetRow.removeFromLeft(presetRow.getWidth() / 2 - 2));
-    presetRow.removeFromLeft(4);
-    nextPresetButton.setBounds(presetRow);
+    // Mini mixer
+    miniMixerBounds = rightPanel.toNearestInt();
 
     // ── Timeline fills the entire center ──
     area.reduce(2, 2);

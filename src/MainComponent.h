@@ -4,7 +4,6 @@
 #include <set>
 #include "PluginHost.h"
 #include "PianoRollComponent.h"
-#include "ArturiaPresetScanner.h" // PresetBrowser
 #include "TimelineComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
@@ -35,6 +34,7 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
+    void mouseDown(const juce::MouseEvent& e) override;
     bool keyPressed(const juce::KeyPress& key) override;
     bool keyStateChanged(bool isKeyDown) override;
 
@@ -108,12 +108,9 @@ private:
     void saveProject();
     void loadProject();
 
-    // ── Right Panel — Presets ──
-    juce::TextButton prevPresetButton { "< Preset" };
-    juce::TextButton nextPresetButton { "Preset >" };
-    juce::Label presetNameLabel;
-    juce::Array<PresetBrowser::PresetInfo> presetList;
-    int currentPresetIndex = -1;
+    // ── Right Panel — Mini Mixer ──
+    void drawMiniMixer(juce::Graphics& g);
+    juce::Rectangle<int> miniMixerBounds;
 
     // ── Right Panel — Mix + Info ──
     juce::Slider volumeSlider;
