@@ -68,6 +68,10 @@ private:
     void addCISysEx(uint8_t subId2, const uint8_t* destMuid,
                     const juce::Array<uint8_t>& payload);
 
+    // Push data to Keystage (using Get Property Data Reply format)
+    void pushParameterListToKeystage();
+    void pushProgramEditToKeystage();
+
     // JSON builders
     juce::String buildResourceList() const;
     juce::String buildDeviceInfo() const;

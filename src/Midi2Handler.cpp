@@ -120,18 +120,27 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
         {
             memcpy(keystageMuid, srcMuid, 4);
             sendDiscoveryReply(srcMuid);
+
+            // After replying, push our data
+            pushParameterListToKeystage();
+            pushProgramEditToKeystage();
             return true;
         }
 
         case 0x71: // Discovery Reply (Keystage responded to our Discovery)
         {
             memcpy(keystageMuid, srcMuid, 4);
-            // Now send PE Capabilities Inquiry to start property exchange
+
+            // Send PE Capabilities Inquiry
             {
                 juce::Array<uint8_t> pePayload;
-                pePayload.add(4); // simultaneous requests
+                pePayload.add(4);
                 addCISysEx(0x30, keystageMuid, pePayload);
             }
+
+            // Proactively push our parameter list and current values to the Keystage
+            pushParameterListToKeystage();
+            pushProgramEditToKeystage();
             return true;
         }
 
@@ -296,6 +305,63 @@ void Midi2Handler::addCISysEx(uint8_t subId2, const uint8_t* destMuid,
     sysex.add(0xF7);       // SysEx end
 
     outgoingMidi.addEvent(juce::MidiMessage(sysex.getRawDataPointer(), sysex.size()), 0);
+}
+
+// ── Push data to Keystage ─────────────────────────────────────────────────────
+
+void Midi2Handler::pushParameterListToKeystage()
+{
+    if (!isConnected()) return;
+
+    juce::String header = "{\"resource\":\"X-ParameterList\"}";
+    juce::String body = buildParameterList();
+
+    // Use Subscription message (0x38) to push data
+    auto headerBytes = encodeJsonForSysex(header);
+    auto bodyBytes = encodeJsonForSysex(body);
+
+    juce::Array<uint8_t> payload;
+    payload.add(0x01); // RequestID
+
+    payload.add(static_cast<uint8_t>(headerBytes.size() & 0x7F));
+    payload.add(static_cast<uint8_t>((headerBytes.size() >> 7) & 0x7F));
+    payload.addArray(headerBytes);
+
+    payload.add(0x01); payload.add(0x00);
+    payload.add(0x01); payload.add(0x00);
+
+    payload.add(static_cast<uint8_t>(bodyBytes.size() & 0x7F));
+    payload.add(static_cast<uint8_t>((bodyBytes.size() >> 7) & 0x7F));
+    payload.addArray(bodyBytes);
+
+    addCISysEx(0x38, keystageMuid, payload);
+}
+
+void Midi2Handler::pushProgramEditToKeystage()
+{
+    if (!isConnected()) return;
+
+    juce::String header = "{\"resource\":\"X-ProgramEdit\"}";
+    juce::String body = buildProgramEdit();
+
+    auto headerBytes = encodeJsonForSysex(header);
+    auto bodyBytes = encodeJsonForSysex(body);
+
+    juce::Array<uint8_t> payload;
+    payload.add(0x02); // RequestID
+
+    payload.add(static_cast<uint8_t>(headerBytes.size() & 0x7F));
+    payload.add(static_cast<uint8_t>((headerBytes.size() >> 7) & 0x7F));
+    payload.addArray(headerBytes);
+
+    payload.add(0x01); payload.add(0x00);
+    payload.add(0x01); payload.add(0x00);
+
+    payload.add(static_cast<uint8_t>(bodyBytes.size() & 0x7F));
+    payload.add(static_cast<uint8_t>((bodyBytes.size() >> 7) & 0x7F));
+    payload.addArray(bodyBytes);
+
+    addCISysEx(0x38, keystageMuid, payload);
 }
 
 // ── Parameter update notification ────────────────────────────────────────────
