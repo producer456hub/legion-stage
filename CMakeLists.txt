@@ -21,8 +21,6 @@ target_sources(Sequencer PRIVATE
     src/PluginHost.cpp
     src/GainProcessor.h
     src/GainProcessor.cpp
-    src/TrackComponent.h
-    src/TrackComponent.cpp
     src/MidiClip.h
     src/ClipPlayerNode.h
     src/ClipPlayerNode.cpp
