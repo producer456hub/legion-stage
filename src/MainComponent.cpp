@@ -65,6 +65,8 @@ MainComponent::MainComponent()
             eng.stop();
         }
         updateClipButtons();
+        if (timelineComponent != nullptr)
+            timelineComponent->repaint();
     };
 
     addAndMakeVisible(metronomeButton);

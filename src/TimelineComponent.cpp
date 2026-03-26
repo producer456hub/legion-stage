@@ -686,8 +686,6 @@ void TimelineComponent::drawMiniNotes(juce::Graphics& g, const MidiClip& clip, j
 void TimelineComponent::drawPlayhead(juce::Graphics& g)
 {
     auto& engine = pluginHost.getEngine();
-    if (!engine.isPlaying()) return;
-
     double pos = engine.getPositionInBeats();
     float x = beatToX(pos);
 
