@@ -198,28 +198,11 @@ MainComponent::MainComponent()
         {
             auto& track = pluginHost.getTrack(selectedTrackIndex);
             midi2Handler.setPlugin(track.plugin);
-
-            // Send CI Discovery to find controllers
-            midi2Handler.sendDiscovery();
-
-            // Send the discovery message out through MIDI
-            auto& outgoing = midi2Handler.getOutgoingMessages();
-            if (!outgoing.isEmpty() && currentMidiDeviceId.isNotEmpty())
-            {
-                auto midiOut = juce::MidiOutput::openDevice(currentMidiDeviceId);
-                if (midiOut)
-                {
-                    for (const auto metadata : outgoing)
-                        midiOut->sendMessageNow(metadata.getMessage());
-                }
-                midi2Handler.clearOutgoing();
-            }
-
-            statusLabel.setText("MIDI 2.0 CI: Discovery sent", juce::dontSendNotification);
+            statusLabel.setText("MIDI 2.0: Waiting for Keystage discovery...", juce::dontSendNotification);
         }
         else
         {
-            statusLabel.setText("MIDI 2.0 CI disabled", juce::dontSendNotification);
+            statusLabel.setText("MIDI 2.0 disabled", juce::dontSendNotification);
         }
     };
 
@@ -596,19 +579,15 @@ void MainComponent::selectMidiDevice()
 
 void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const juce::MidiMessage& msg)
 {
-    // Log all incoming messages for debugging
     if (midi2Enabled)
     {
-        if (msg.isSysEx())
+        // Route CI SysEx to the handler
+        if (midi2Handler.processIncoming(msg))
         {
-            // CI SysEx received — route to handler
-            midi2Handler.processMessage(msg);
-
-            // Send CI responses back to the controller
-            auto& outgoing = midi2Handler.getOutgoingMessages();
+            // Send CI responses back to the Keystage
+            auto& outgoing = midi2Handler.getOutgoing();
             if (!outgoing.isEmpty())
             {
-                // Send each response message back through the MIDI output
                 auto midiOut = juce::MidiOutput::openDevice(currentMidiDeviceId);
                 if (midiOut)
                 {
@@ -619,8 +598,19 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
             }
 
             juce::MessageManager::callAsync([this] {
-                statusLabel.setText("CI: SysEx received", juce::dontSendNotification);
+                statusLabel.setText(midi2Handler.isConnected()
+                    ? "MIDI 2.0: Keystage connected!" : "MIDI 2.0: CI message received",
+                    juce::dontSendNotification);
             });
+
+            return; // Don't forward CI SysEx to the audio engine
+        }
+
+        // Handle CC 24-31 from Keystage knobs
+        if (msg.isController() && msg.getControllerNumber() >= 24 && msg.getControllerNumber() <= 31)
+        {
+            midi2Handler.handleCC(msg.getControllerNumber(), msg.getControllerValue());
+            // Don't return — still forward to collector for recording
         }
     }
 

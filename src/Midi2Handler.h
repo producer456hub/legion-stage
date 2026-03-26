@@ -2,67 +2,77 @@
 
 #include <JuceHeader.h>
 
-// MIDI 2.0 CI handler — sets up a MIDI-CI Device that exposes
-// plugin parameters via Property Exchange for auto-mapping
-// with MIDI 2.0 controllers like the Korg Keystage.
-class Midi2Handler : public juce::midi_ci::DeviceListener,
-                     public juce::midi_ci::PropertyDelegate
+// Korg Keystage MIDI 2.0 CI handler.
+// Implements MIDI-CI Property Exchange manually using raw SysEx,
+// exposing plugin parameters via X-ParameterList and X-ProgramEdit
+// for the Keystage's auto-mapping OLED knob display.
+//
+// The Keystage knobs send CCs 24-31. We map those to plugin params.
+class Midi2Handler
 {
 public:
     Midi2Handler();
-    ~Midi2Handler() override;
 
     // Set the plugin whose parameters should be exposed
     void setPlugin(juce::AudioProcessor* plugin);
 
-    // Process incoming MIDI from the device (raw sysex)
-    void processMessage(const juce::MidiMessage& msg);
+    // Process incoming MIDI — checks for CI SysEx
+    // Returns true if the message was a CI message (handled)
+    bool processIncoming(const juce::MidiMessage& msg);
 
-    // Get outgoing MIDI messages to send to the device
-    juce::MidiBuffer& getOutgoingMessages() { return outgoingMidi; }
+    // Get outgoing CI response messages
+    juce::MidiBuffer& getOutgoing() { return outgoingMidi; }
     void clearOutgoing() { outgoingMidi.clear(); }
 
-    // Initiate discovery — sends CI discovery message
-    void sendDiscovery();
+    // Handle CC 24-31 from Keystage knobs → set plugin parameters
+    void handleCC(int ccNumber, int value);
+
+    // Send X-ProgramEdit update (call when a parameter changes)
+    void sendParameterUpdate();
 
     // Status
-    bool isConnected() const;
-    juce::String getStatusText() const;
+    bool isConnected() const { return keystageMuid[0] != 0 || keystageMuid[1] != 0; }
 
-    // DeviceListener overrides
-    void deviceAdded(juce::midi_ci::MUID muid) override;
-    void deviceRemoved(juce::midi_ci::MUID muid) override;
-
-    // PropertyDelegate overrides
-    uint8_t getNumSimultaneousRequestsSupported() const override { return 4; }
-
-    juce::midi_ci::PropertyReplyData propertyGetDataRequested(juce::midi_ci::MUID,
-        const juce::midi_ci::PropertyRequestHeader& header) override;
-
-    juce::midi_ci::PropertyReplyHeader propertySetDataRequested(juce::midi_ci::MUID,
-        const juce::midi_ci::PropertyRequestData& data) override;
-
-    bool subscriptionStartRequested(juce::midi_ci::MUID,
-        const juce::midi_ci::PropertySubscriptionHeader&) override { return true; }
-
-    void subscriptionDidStart(juce::midi_ci::MUID, const juce::String&,
-        const juce::midi_ci::PropertySubscriptionHeader&) override {}
-
-    void subscriptionWillEnd(juce::midi_ci::MUID,
-        const juce::midi_ci::Subscription&) override {}
+    // Parameter mapping info
+    struct ParamMapping {
+        int pluginParamIndex = -1;
+        int cc = 0;
+        juce::String name;
+    };
+    const juce::Array<ParamMapping>& getMappings() const { return mappings; }
 
 private:
-    class OutputHandler;
-    std::unique_ptr<OutputHandler> outputHandler;
-    std::unique_ptr<juce::midi_ci::Device> ciDevice;
-
     juce::AudioProcessor* currentPlugin = nullptr;
-    juce::midi_ci::MUID connectedMuid;
     juce::MidiBuffer outgoingMidi;
 
-    // Build JSON resource list of plugin parameters
+    // Our MUID (4 bytes, LSB first)
+    uint8_t ourMuid[4] = { 0x12, 0x34, 0x56, 0x00 };
+
+    // Keystage's MUID (learned from Discovery)
+    uint8_t keystageMuid[4] = { 0, 0, 0, 0 };
+
+    // Parameter mappings (up to 8 knobs → CCs 24-31)
+    juce::Array<ParamMapping> mappings;
+    void buildMappings();
+
+    // CI message builders
+    void sendDiscoveryReply(const uint8_t* destMuid);
+    void sendPECapabilityReply(const uint8_t* destMuid, uint8_t requestId);
+    void sendPropertyReply(const uint8_t* destMuid, uint8_t requestId,
+                           const juce::String& headerJson, const juce::String& bodyJson);
+
+    // SysEx helpers
+    void addCISysEx(uint8_t subId2, const uint8_t* destMuid,
+                    const juce::Array<uint8_t>& payload);
+
+    // JSON builders
     juce::String buildResourceList() const;
-    juce::String buildParameterData(int paramIndex) const;
+    juce::String buildDeviceInfo() const;
+    juce::String buildParameterList() const;
+    juce::String buildProgramEdit() const;
+
+    // Encode JSON to 7-bit safe (for SysEx)
+    static juce::Array<uint8_t> encodeJsonForSysex(const juce::String& json);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Midi2Handler)
 };

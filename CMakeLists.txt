@@ -52,7 +52,6 @@ target_link_libraries(Sequencer PRIVATE
     juce::juce_audio_utils
     juce::juce_audio_devices
     juce::juce_audio_processors
-    juce::juce_midi_ci
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
 )
