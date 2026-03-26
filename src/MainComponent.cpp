@@ -759,13 +759,21 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
                     recordButton.setToggleState(pluginHost.getEngine().isRecording(), juce::dontSendNotification);
                 });
             }
-            else if (tcc == 0x2B || tcc == 43) // REW → scroll timeline left
+            else if (tcc == 0x2B || tcc == 43) // REW / SHIFT+VALUE LEFT → move playhead back
             {
-                if (timelineComponent) timelineComponent->scrollLeft();
+                auto& eng = pluginHost.getEngine();
+                double pos = eng.getPositionInBeats();
+                double grid = timelineComponent ? timelineComponent->getGridResolution() : 1.0;
+                eng.setPosition(juce::jmax(0.0, pos - grid));
+                if (timelineComponent) timelineComponent->repaint();
             }
-            else if (tcc == 0x2C || tcc == 44) // FF → scroll timeline right
+            else if (tcc == 0x2C || tcc == 44) // FF / SHIFT+VALUE RIGHT → move playhead forward
             {
-                if (timelineComponent) timelineComponent->scrollRight();
+                auto& eng = pluginHost.getEngine();
+                double pos = eng.getPositionInBeats();
+                double grid = timelineComponent ? timelineComponent->getGridResolution() : 1.0;
+                eng.setPosition(pos + grid);
+                if (timelineComponent) timelineComponent->repaint();
             }
             else if (tcc == 0x2E || tcc == 46) // LOOP → (reserved for future)
             {
