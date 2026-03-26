@@ -110,18 +110,20 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
     {
         double beatPos = pos + (sample * beatsPerSample);
 
-        // Calculate clip-local position, looping within the clip
+        // Calculate clip-local position — NO looping in arranger mode
         double relPos = beatPos - clipTimelineStart;
-        double clipPos = std::fmod(relPos, clipLen);
-        if (clipPos < 0.0) clipPos += clipLen;
 
-        // Check previous sample position for event detection
+        // Skip if playhead is before or past the clip
+        if (relPos < 0.0 || relPos >= clipLen)
+            continue;
+
+        double clipPos = relPos;
         double prevRelPos = relPos - beatsPerSample;
-        double prevClipPos = std::fmod(prevRelPos, clipLen);
-        if (prevClipPos < 0.0) prevClipPos += clipLen;
+        double prevClipPos = prevRelPos;
+        if (prevClipPos < 0.0) prevClipPos = 0.0;
 
-        // Handle wrap-around
-        bool wrapped = prevClipPos > clipPos;
+        // No wrap-around in arranger mode
+        bool wrapped = false;
 
         for (int e = 0; e < clip.events.getNumEvents(); ++e)
         {
