@@ -247,15 +247,20 @@ void ClipPlayerNode::stopSlot(int slotIndex)
     if (slotIndex < 0 || slotIndex >= NUM_SLOTS) return;
 
     auto& slot = slots[static_cast<size_t>(slotIndex)];
+    auto state = slot.state.load();
 
-    if (slot.state.load() == ClipSlot::Recording)
+    // Don't touch Armed clips — they should stay armed until manually clicked
+    if (state == ClipSlot::Armed || state == ClipSlot::Empty)
+        return;
+
+    if (state == ClipSlot::Recording)
     {
         recordingSlot = -1;
         if (slot.clip != nullptr)
             slot.clip->events.sort();
     }
 
-    if (slot.state.load() != ClipSlot::Empty)
+    if (state == ClipSlot::Playing || state == ClipSlot::Recording)
     {
         slot.state.store(slot.hasContent() ? ClipSlot::Stopped : ClipSlot::Empty);
         sendAllNotesOff.store(true);
