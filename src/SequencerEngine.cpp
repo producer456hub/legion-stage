@@ -8,7 +8,7 @@ void SequencerEngine::play()
     if (countInEnabled.load() && recording.load() && !playing.load())
     {
         countingIn.store(true);
-        countInBeatsRemaining = 16.0; // 4 bars
+        countInBeatsRemaining = 4.0; // 1 bar (4 beats)
         savedPosition = positionInBeats.load();
     }
 
@@ -53,7 +53,7 @@ double SequencerEngine::advancePosition(int numSamples, double sampleRate)
         countInBeatsRemaining -= beatsThisBlock;
 
         // ALWAYS play metronome clicks during count-in (regardless of metronome toggle)
-        double countInPos = 16.0 - countInBeatsRemaining;
+        double countInPos = 4.0 - countInBeatsRemaining;
         double prevPos = countInPos - beatsThisBlock;
 
         int oldBeat = static_cast<int>(std::floor(prevPos));
