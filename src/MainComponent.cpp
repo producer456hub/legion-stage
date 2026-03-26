@@ -84,30 +84,35 @@ MainComponent::MainComponent()
     addAndMakeVisible(newClipButton);
     newClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff336655));
     newClipButton.onClick = [this] {
+        takeSnapshot();
         if (timelineComponent) timelineComponent->createClipAtPlayhead();
     };
 
     addAndMakeVisible(deleteClipButton);
     deleteClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff553333));
     deleteClipButton.onClick = [this] {
+        takeSnapshot();
         if (timelineComponent) timelineComponent->deleteSelected();
     };
 
     addAndMakeVisible(duplicateClipButton);
     duplicateClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff335555));
     duplicateClipButton.onClick = [this] {
+        takeSnapshot();
         if (timelineComponent) timelineComponent->duplicateSelected();
     };
 
     addAndMakeVisible(splitClipButton);
     splitClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555533));
     splitClipButton.onClick = [this] {
+        takeSnapshot();
         if (timelineComponent) timelineComponent->splitSelected();
     };
 
     addAndMakeVisible(quantizeButton);
     quantizeButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555544));
     quantizeButton.onClick = [this] {
+        takeSnapshot();
         if (timelineComponent) timelineComponent->quantizeSelectedClip();
     };
 
@@ -251,6 +256,7 @@ MainComponent::MainComponent()
 
     // ── Timeline (arrangement view — always visible) ──
     timelineComponent = std::make_unique<TimelineComponent>(pluginHost);
+    timelineComponent->onBeforeEdit = [this] { takeSnapshot(); };
     addAndMakeVisible(*timelineComponent);
 
     setSize(1280, 800);
@@ -260,6 +266,9 @@ MainComponent::MainComponent()
     scanMidiDevices();
     selectTrack(0);
     updateStatusLabel();
+
+    // Initial undo snapshot
+    takeSnapshot();
 
     startTimerHz(15);
 }

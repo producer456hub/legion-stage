@@ -18,6 +18,9 @@ public:
     bool hasSelection() const { return selectedClip.isValid(); }
     MidiClip* getSelectedClip();
 
+    // Callback for undo snapshots before drag edits
+    std::function<void()> onBeforeEdit;
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;

@@ -187,6 +187,10 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& e)
         dragStartTrack = yToTrack(my);
 
         auto rect = getClipRect(hit.trackIndex, hit.slotIndex);
+
+        // Snapshot before any drag edit
+        if (onBeforeEdit) onBeforeEdit();
+
         if (isOnClipRightEdge(mx, rect))
             dragMode = ResizeClipRight;
         else if (isOnClipLeftEdge(mx, rect))
