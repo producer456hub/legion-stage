@@ -263,12 +263,35 @@ MainComponent::MainComponent()
         int paramIdx = i; // capture for lambda
         slider->onValueChange = [this, slider] {
             auto& track = pluginHost.getTrack(selectedTrackIndex);
-            if (track.plugin != nullptr)
+            if (track.plugin == nullptr) return;
+
+            int realIdx = static_cast<int>(slider->getProperties().getWithDefault("paramIndex", -1));
+            auto& params = track.plugin->getParameters();
+            if (realIdx < 0 || realIdx >= params.size()) return;
+
+            params[realIdx]->setValue(static_cast<float>(slider->getValue()));
+
+            // Record automation if transport is playing + recording
+            auto& eng = pluginHost.getEngine();
+            if (eng.isPlaying() && eng.isRecording() && !eng.isInCountIn())
             {
-                int realIdx = slider->getProperties().getWithDefault("paramIndex", -1);
-                auto& params = track.plugin->getParameters();
-                if (realIdx >= 0 && realIdx < params.size())
-                    params[realIdx]->setValue(static_cast<float>(slider->getValue()));
+                AutomationLane* lane = nullptr;
+                for (auto* l : track.automationLanes)
+                {
+                    if (l->parameterIndex == realIdx) { lane = l; break; }
+                }
+                if (lane == nullptr)
+                {
+                    lane = new AutomationLane();
+                    lane->parameterIndex = realIdx;
+                    lane->parameterName = params[realIdx]->getName(20);
+                    track.automationLanes.add(lane);
+                }
+
+                AutomationPoint pt;
+                pt.beat = eng.getPositionInBeats();
+                pt.value = static_cast<float>(slider->getValue());
+                lane->points.add(pt);
             }
         };
 

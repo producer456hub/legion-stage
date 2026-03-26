@@ -666,6 +666,7 @@ void TimelineComponent::paint(juce::Graphics& g)
     drawHeader(g);
     drawTrackLanes(g);
     drawClips(g);
+    drawAutomation(g);
     drawPlayhead(g);
 }
 
@@ -964,6 +965,56 @@ void TimelineComponent::drawMiniNotes(juce::Graphics& g, const MidiClip& clip, j
         float ny = area.getY() + 3.0f + noteRow * noteH;
 
         g.fillRect(nx, ny, juce::jmax(1.0f, nw), juce::jmax(1.0f, noteH - 1.0f));
+    }
+}
+
+void TimelineComponent::drawAutomation(juce::Graphics& g)
+{
+    static const juce::Colour autoColors[] = {
+        juce::Colour(0xccff6644), juce::Colour(0xcc44ff66),
+        juce::Colour(0xcc4466ff), juce::Colour(0xccffff44),
+        juce::Colour(0xccff44ff), juce::Colour(0xcc44ffff)
+    };
+
+    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+    {
+        auto& track = pluginHost.getTrack(t);
+        int laneY = headerHeight + t * trackHeight;
+        int colorIdx = 0;
+
+        for (auto* lane : track.automationLanes)
+        {
+            if (lane->points.size() < 2) { colorIdx++; continue; }
+
+            g.setColour(autoColors[colorIdx % 6]);
+            colorIdx++;
+
+            juce::Path path;
+            bool started = false;
+
+            for (auto& pt : lane->points)
+            {
+                float x = beatToX(pt.beat);
+                float y = static_cast<float>(laneY + trackHeight - 4)
+                         - pt.value * static_cast<float>(trackHeight - 8);
+
+                if (x < static_cast<float>(trackLabelWidth) || x > static_cast<float>(getWidth()))
+                    continue;
+
+                if (!started)
+                {
+                    path.startNewSubPath(x, y);
+                    started = true;
+                }
+                else
+                {
+                    path.lineTo(x, y);
+                }
+            }
+
+            if (started)
+                g.strokePath(path, juce::PathStrokeType(2.0f));
+        }
     }
 }
 

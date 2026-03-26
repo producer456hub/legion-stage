@@ -211,6 +211,31 @@ void PluginHost::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer
 
     AudioProcessorGraph::processBlock(buffer, midiMessages);
 
+    // Apply automation during playback
+    if (engine.isPlaying() && !engine.isInCountIn())
+    {
+        double beat = engine.getPositionInBeats();
+
+        for (int t = 0; t < NUM_TRACKS; ++t)
+        {
+            auto& track = tracks[static_cast<size_t>(t)];
+            if (track.plugin == nullptr) continue;
+
+            auto& params = track.plugin->getParameters();
+
+            for (auto* lane : track.automationLanes)
+            {
+                if (lane->parameterIndex >= 0 && lane->parameterIndex < params.size()
+                    && !lane->points.isEmpty())
+                {
+                    float val = lane->getValueAtBeat(beat);
+                    if (val >= 0.0f)
+                        params[lane->parameterIndex]->setValue(val);
+                }
+            }
+        }
+    }
+
     // Render metronome click on top of the output
     engine.renderMetronome(buffer, buffer.getNumSamples(), storedSampleRate);
 }

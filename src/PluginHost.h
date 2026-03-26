@@ -16,6 +16,7 @@ struct Track {
     GainProcessor* gainProcessor = nullptr;
     ClipPlayerNode* clipPlayer = nullptr;
     juce::AudioProcessor* plugin = nullptr;
+    juce::OwnedArray<AutomationLane> automationLanes;
 };
 
 class PluginHost : public juce::AudioProcessorGraph

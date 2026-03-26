@@ -86,6 +86,7 @@ private:
     void drawTrackLanes(juce::Graphics& g);
     void drawTrackControls(juce::Graphics& g);
     void drawClips(juce::Graphics& g);
+    void drawAutomation(juce::Graphics& g);
     void drawPlayhead(juce::Graphics& g);
     void drawMiniNotes(juce::Graphics& g, const MidiClip& clip, juce::Rectangle<float> area);
 
