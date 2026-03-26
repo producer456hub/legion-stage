@@ -119,38 +119,6 @@ MainComponent::MainComponent()
         if (track.gainProcessor) track.gainProcessor->pan.store(static_cast<float>(panSlider.getValue()));
     };
 
-    addAndMakeVisible(muteButton);
-    muteButton.setClickingTogglesState(true);
-    muteButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red);
-    muteButton.onClick = [this] {
-        auto& track = pluginHost.getTrack(selectedTrackIndex);
-        if (track.gainProcessor) track.gainProcessor->muted.store(muteButton.getToggleState());
-    };
-
-    addAndMakeVisible(soloButton);
-    soloButton.setClickingTogglesState(true);
-    soloButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::yellow);
-    soloButton.onClick = [this] {
-        auto& track = pluginHost.getTrack(selectedTrackIndex);
-        if (track.gainProcessor)
-        {
-            bool was = track.gainProcessor->soloed.load();
-            bool now = soloButton.getToggleState();
-            track.gainProcessor->soloed.store(now);
-            if (now && !was) pluginHost.soloCount.fetch_add(1);
-            else if (!now && was) pluginHost.soloCount.fetch_sub(1);
-        }
-    };
-
-    addAndMakeVisible(armButton);
-    armButton.setClickingTogglesState(true);
-    armButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
-    armButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red.darker());
-    armButton.onClick = [this] {
-        auto* cp = pluginHost.getTrack(selectedTrackIndex).clipPlayer;
-        if (cp) cp->armed.store(armButton.getToggleState());
-    };
-
     addAndMakeVisible(statusLabel);
     statusLabel.setJustificationType(juce::Justification::centred);
     statusLabel.setFont(juce::Font(12.0f));
@@ -194,13 +162,6 @@ void MainComponent::timerCallback()
         updateTrackDisplay();
         updateStatusLabel();
     }
-    else
-    {
-        // Keep arm button in sync even if track didn't change
-        auto* cp = pluginHost.getTrack(selectedTrackIndex).clipPlayer;
-        if (cp)
-            armButton.setToggleState(cp->armed.load(), juce::dontSendNotification);
-    }
 }
 
 // ── Track Selection ──────────────────────────────────────────────────────────
@@ -231,12 +192,7 @@ void MainComponent::updateTrackDisplay()
     {
         volumeSlider.setValue(track.gainProcessor->volume.load(), juce::dontSendNotification);
         panSlider.setValue(track.gainProcessor->pan.load(), juce::dontSendNotification);
-        muteButton.setToggleState(track.gainProcessor->muted.load(), juce::dontSendNotification);
-        soloButton.setToggleState(track.gainProcessor->soloed.load(), juce::dontSendNotification);
     }
-
-    if (track.clipPlayer)
-        armButton.setToggleState(track.clipPlayer->armed.load(), juce::dontSendNotification);
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -435,12 +391,6 @@ void MainComponent::resized()
     volumeSlider.setBounds(bottomBar.removeFromLeft(150));
     bottomBar.removeFromLeft(8);
     panSlider.setBounds(bottomBar.removeFromLeft(100));
-    bottomBar.removeFromLeft(8);
-    muteButton.setBounds(bottomBar.removeFromLeft(35));
-    bottomBar.removeFromLeft(4);
-    soloButton.setBounds(bottomBar.removeFromLeft(35));
-    bottomBar.removeFromLeft(4);
-    armButton.setBounds(bottomBar.removeFromLeft(50));
     bottomBar.removeFromLeft(8);
     statusLabel.setBounds(bottomBar);
 

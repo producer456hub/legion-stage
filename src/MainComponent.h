@@ -69,9 +69,6 @@ private:
     // ── Bottom Bar ──
     juce::Slider volumeSlider;
     juce::Slider panSlider;
-    juce::TextButton muteButton { "M" };
-    juce::TextButton soloButton { "S" };
-    juce::TextButton armButton { "ARM" };
     juce::Label statusLabel;
 
     // ── Timeline (arrangement view) ──
