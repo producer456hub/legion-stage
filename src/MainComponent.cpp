@@ -17,42 +17,35 @@ MainComponent::MainComponent()
                                  device->getCurrentBufferSizeSamples());
     }
 
-    // MIDI
-    addAndMakeVisible(midiInputSelector);
-    midiInputSelector.onChange = [this] { selectMidiDevice(); };
-    addAndMakeVisible(midiRefreshButton);
-    midiRefreshButton.onClick = [this] { scanMidiDevices(); };
+    // ── Top Bar: Transport + Track Select ──
+    addAndMakeVisible(prevTrackButton);
+    prevTrackButton.onClick = [this] { selectTrack(juce::jmax(0, selectedTrackIndex - 1)); };
 
-    // Plugin
-    addAndMakeVisible(pluginSelector);
-    pluginSelector.onChange = [this] { loadSelectedPlugin(); };
-    addAndMakeVisible(openEditorButton);
-    openEditorButton.onClick = [this] { openPluginEditor(); };
-    openEditorButton.setEnabled(false);
-    addAndMakeVisible(testNoteButton);
-    testNoteButton.onClick = [this] { playTestNote(); };
-    testNoteButton.setEnabled(false);
-    addAndMakeVisible(audioSettingsButton);
-    audioSettingsButton.onClick = [this] { showAudioSettings(); };
+    addAndMakeVisible(nextTrackButton);
+    nextTrackButton.onClick = [this] { selectTrack(juce::jmin(PluginHost::NUM_TRACKS - 1, selectedTrackIndex + 1)); };
 
-    // Transport
+    addAndMakeVisible(trackNameLabel);
+    trackNameLabel.setJustificationType(juce::Justification::centred);
+    trackNameLabel.setFont(juce::Font(18.0f, juce::Font::bold));
+    trackNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+
     addAndMakeVisible(recordButton);
     recordButton.setClickingTogglesState(true);
-    recordButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red);
+    recordButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
+    recordButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red.darker());
     recordButton.onClick = [this] { pluginHost.getEngine().toggleRecord(); };
 
     addAndMakeVisible(playButton);
+    playButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff336633));
     playButton.onClick = [this] { pluginHost.getEngine().play(); };
 
     addAndMakeVisible(stopButton);
+    stopButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
     stopButton.onClick = [this] {
         auto& eng = pluginHost.getEngine();
-
         if (!eng.isPlaying())
         {
-            // Already stopped — this is effectively a double-click: reset to start
             eng.resetPosition();
-            // Stop all clips
             for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
             {
                 auto* cp = pluginHost.getTrack(t).clipPlayer;
@@ -61,16 +54,15 @@ MainComponent::MainComponent()
         }
         else
         {
-            // First click — just stop transport, keep position
             eng.stop();
         }
-        updateClipButtons();
-        if (timelineComponent != nullptr)
-            timelineComponent->repaint();
+        updateClipPads();
+        if (timelineComponent) timelineComponent->repaint();
     };
 
     addAndMakeVisible(metronomeButton);
     metronomeButton.setClickingTogglesState(true);
+    metronomeButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
     metronomeButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff886600));
     metronomeButton.onClick = [this] { pluginHost.getEngine().toggleMetronome(); };
 
@@ -78,41 +70,110 @@ MainComponent::MainComponent()
     bpmSlider.setRange(20.0, 300.0, 1.0);
     bpmSlider.setValue(120.0, juce::dontSendNotification);
     bpmSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    bpmSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 20);
-    bpmSlider.onValueChange = [this] {
-        pluginHost.getEngine().setBpm(bpmSlider.getValue());
-    };
-
-    addAndMakeVisible(bpmLabel);
-    bpmLabel.setText("BPM:", juce::dontSendNotification);
+    bpmSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 45, 25);
+    bpmSlider.onValueChange = [this] { pluginHost.getEngine().setBpm(bpmSlider.getValue()); };
 
     addAndMakeVisible(beatLabel);
-    beatLabel.setText("Beat: 0.0", juce::dontSendNotification);
+    beatLabel.setFont(juce::Font(14.0f));
+
+    // ── Clip Pads (4 large buttons) ──
+    for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+    {
+        auto* pad = new juce::TextButton(juce::String(s + 1));
+        pad->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3a3a3a));
+        pad->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+        pad->onClick = [this, s] { onClipPadClicked(s); };
+        addAndMakeVisible(pad);
+        clipPads.add(pad);
+    }
+
+    // ── Right Panel ──
+    addAndMakeVisible(pluginSelector);
+    pluginSelector.onChange = [this] { loadSelectedPlugin(); };
+
+    addAndMakeVisible(openEditorButton);
+    openEditorButton.onClick = [this] { openPluginEditor(); };
+    openEditorButton.setEnabled(false);
+
+    addAndMakeVisible(midiInputSelector);
+    midiInputSelector.onChange = [this] { selectMidiDevice(); };
+
+    addAndMakeVisible(audioSettingsButton);
+    audioSettingsButton.onClick = [this] { showAudioSettings(); };
+
+    addAndMakeVisible(testNoteButton);
+    testNoteButton.onClick = [this] { playTestNote(); };
+    testNoteButton.setEnabled(false);
+
+    // ── Bottom Bar: Mix Controls ──
+    addAndMakeVisible(volumeSlider);
+    volumeSlider.setRange(0.0, 1.0, 0.01);
+    volumeSlider.setValue(0.8, juce::dontSendNotification);
+    volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    volumeSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    volumeSlider.onValueChange = [this] {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.gainProcessor) track.gainProcessor->volume.store(static_cast<float>(volumeSlider.getValue()));
+    };
+
+    addAndMakeVisible(panSlider);
+    panSlider.setRange(-1.0, 1.0, 0.01);
+    panSlider.setValue(0.0, juce::dontSendNotification);
+    panSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    panSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    panSlider.onValueChange = [this] {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.gainProcessor) track.gainProcessor->pan.store(static_cast<float>(panSlider.getValue()));
+    };
+
+    addAndMakeVisible(muteButton);
+    muteButton.setClickingTogglesState(true);
+    muteButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red);
+    muteButton.onClick = [this] {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.gainProcessor) track.gainProcessor->muted.store(muteButton.getToggleState());
+    };
+
+    addAndMakeVisible(soloButton);
+    soloButton.setClickingTogglesState(true);
+    soloButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::yellow);
+    soloButton.onClick = [this] {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.gainProcessor)
+        {
+            bool was = track.gainProcessor->soloed.load();
+            bool now = soloButton.getToggleState();
+            track.gainProcessor->soloed.store(now);
+            if (now && !was) pluginHost.soloCount.fetch_add(1);
+            else if (!now && was) pluginHost.soloCount.fetch_sub(1);
+        }
+    };
+
+    addAndMakeVisible(armButton);
+    armButton.setClickingTogglesState(true);
+    armButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
+    armButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::red.darker());
+    armButton.onClick = [this] {
+        auto* cp = pluginHost.getTrack(selectedTrackIndex).clipPlayer;
+        if (cp) cp->armed.store(armButton.getToggleState());
+    };
 
     addAndMakeVisible(statusLabel);
     statusLabel.setJustificationType(juce::Justification::centred);
+    statusLabel.setFont(juce::Font(12.0f));
 
-    // Track list + clip grid
-    setupTrackList();
-    addAndMakeVisible(trackViewport);
-    trackViewport.setViewedComponent(&trackListContainer, false);
-
-    setupClipGrid();
-    addAndMakeVisible(clipGridViewport);
-    clipGridViewport.setViewedComponent(&clipGridContainer, false);
-
-    // Timeline
+    // ── Timeline ──
     timelineComponent = std::make_unique<TimelineComponent>(pluginHost);
     addAndMakeVisible(*timelineComponent);
 
-    setSize(1100, 800);
+    setSize(1280, 800);  // Legion Go native-ish
+    setWantsKeyboardFocus(true);
 
     scanPlugins();
     scanMidiDevices();
     selectTrack(0);
     updateStatusLabel();
 
-    // Timer for UI updates (clip states, beat display)
     startTimerHz(15);
 }
 
@@ -125,165 +186,186 @@ MainComponent::~MainComponent()
     deviceManager.removeAudioCallback(&audioPlayer);
 }
 
+// ── Timer ────────────────────────────────────────────────────────────────────
+
 void MainComponent::timerCallback()
 {
-    // Update beat display
     double beat = pluginHost.getEngine().getPositionInBeats();
     beatLabel.setText("Beat: " + juce::String(beat, 1), juce::dontSendNotification);
-
-    // Update clip button states
-    updateClipButtons();
+    updateClipPads();
 }
 
-// ── Track List ───────────────────────────────────────────────────────────────
+// ── Track Selection ──────────────────────────────────────────────────────────
 
-void MainComponent::setupTrackList()
+void MainComponent::selectTrack(int index)
 {
-    trackComponents.clear();
-    for (int i = 0; i < PluginHost::NUM_TRACKS; ++i)
+    selectedTrackIndex = juce::jlimit(0, PluginHost::NUM_TRACKS - 1, index);
+    pluginHost.setSelectedTrack(selectedTrackIndex);
+    closePluginEditor();
+    updateTrackDisplay();
+    updateClipPads();
+    updateStatusLabel();
+
+    // Reset plugin selector
+    pluginSelector.setSelectedId(1, juce::dontSendNotification);
+}
+
+void MainComponent::updateTrackDisplay()
+{
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+
+    juce::String name = "Track " + juce::String(selectedTrackIndex + 1);
+    if (track.plugin != nullptr)
+        name += ": " + track.plugin->getName();
+    trackNameLabel.setText(name, juce::dontSendNotification);
+
+    openEditorButton.setEnabled(track.plugin != nullptr);
+    testNoteButton.setEnabled(track.plugin != nullptr);
+
+    // Sync mix controls to this track's state
+    if (track.gainProcessor)
     {
-        auto* tc = new TrackComponent(i);
-        tc->onSelected = [this](int idx) { selectTrack(idx); };
-        tc->onVolumeChanged = [this](int idx, float vol) { onTrackVolumeChanged(idx, vol); };
-        tc->onMuteChanged = [this](int idx, bool m) { onTrackMuteChanged(idx, m); };
-        tc->onSoloChanged = [this](int idx, bool s) { onTrackSoloChanged(idx, s); };
-        tc->onArmChanged = [this](int idx, bool a) { onTrackArmChanged(idx, a); };
-        trackListContainer.addAndMakeVisible(tc);
-        trackComponents.add(tc);
+        volumeSlider.setValue(track.gainProcessor->volume.load(), juce::dontSendNotification);
+        panSlider.setValue(track.gainProcessor->pan.load(), juce::dontSendNotification);
+        muteButton.setToggleState(track.gainProcessor->muted.load(), juce::dontSendNotification);
+        soloButton.setToggleState(track.gainProcessor->soloed.load(), juce::dontSendNotification);
     }
-    trackListContainer.setSize(280, PluginHost::NUM_TRACKS * 32);
+
+    if (track.clipPlayer)
+        armButton.setToggleState(track.clipPlayer->armed.load(), juce::dontSendNotification);
 }
 
-void MainComponent::setupClipGrid()
-{
-    clipButtons.clear();
-    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
-    {
-        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
-        {
-            auto* btn = new juce::TextButton(juce::String(s + 1));
-            btn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
-            btn->setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff666666));
-            btn->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-            btn->onClick = [this, t, s] { onClipButtonClicked(t, s); };
-            addAndMakeVisible(btn);
-            clipButtons.add(btn);
-        }
-    }
-}
+// ── Clip Pads ────────────────────────────────────────────────────────────────
 
-void MainComponent::onClipButtonClicked(int trackIndex, int slotIndex)
+void MainComponent::onClipPadClicked(int slotIndex)
 {
-    // Shift+click opens piano roll editor
+    // Shift+click opens piano roll
     if (juce::ModifierKeys::currentModifiers.isShiftDown())
     {
-        auto* cp = pluginHost.getTrack(trackIndex).clipPlayer;
+        auto* cp = pluginHost.getTrack(selectedTrackIndex).clipPlayer;
         if (cp != nullptr)
         {
             auto& slot = cp->getSlot(slotIndex);
             if (slot.clip != nullptr && slot.hasContent())
             {
-                new PianoRollWindow("Piano Roll - Track " + juce::String(trackIndex + 1)
-                    + " Slot " + juce::String(slotIndex + 1), *slot.clip,
-                    pluginHost.getEngine());
+                new PianoRollWindow("Piano Roll - Track " + juce::String(selectedTrackIndex + 1),
+                    *slot.clip, pluginHost.getEngine());
             }
         }
         return;
     }
 
-    auto* cp = pluginHost.getTrack(trackIndex).clipPlayer;
+    auto* cp = pluginHost.getTrack(selectedTrackIndex).clipPlayer;
     if (cp == nullptr) return;
-
     cp->triggerSlot(slotIndex);
-    updateClipButtons();
+    updateClipPads();
 }
 
-void MainComponent::updateClipButtons()
+void MainComponent::updateClipPads()
 {
-    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+    auto* cp = pluginHost.getTrack(selectedTrackIndex).clipPlayer;
+    if (cp == nullptr) return;
+
+    for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
     {
-        auto* cp = pluginHost.getTrack(t).clipPlayer;
-        if (cp == nullptr) continue;
+        auto& slot = cp->getSlot(s);
+        auto* pad = clipPads[s];
+        auto state = slot.state.load();
 
-        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+        switch (state)
         {
-            auto& slot = cp->getSlot(s);
-            auto* btn = clipButtons[t * ClipPlayerNode::NUM_SLOTS + s];
-
-            auto state = slot.state.load();
-            switch (state)
-            {
-                case ClipSlot::Empty:
-                    btn->setButtonText("");
-                    btn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff333333));
-                    break;
-                case ClipSlot::Stopped:
-                    btn->setButtonText(juce::String::charToString(0x25A0)); // ■
-                    btn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
-                    break;
-                case ClipSlot::Playing:
-                    btn->setButtonText(juce::String::charToString(0x25B6)); // ▶
-                    btn->setColour(juce::TextButton::buttonColourId, juce::Colours::green.darker());
-                    break;
-                case ClipSlot::Recording:
-                    btn->setButtonText(juce::String::charToString(0x25CF)); // ●
-                    btn->setColour(juce::TextButton::buttonColourId, juce::Colours::red.darker());
-                    break;
-                case ClipSlot::Armed:
-                    btn->setButtonText("ARM");
-                    btn->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff884400));
-                    break;
-            }
+            case ClipSlot::Empty:
+                pad->setButtonText(juce::String(s + 1));
+                pad->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff3a3a3a));
+                break;
+            case ClipSlot::Stopped:
+                pad->setButtonText(juce::String::charToString(0x25A0));
+                pad->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
+                break;
+            case ClipSlot::Playing:
+                pad->setButtonText(juce::String::charToString(0x25B6));
+                pad->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff338844));
+                break;
+            case ClipSlot::Recording:
+                pad->setButtonText(juce::String::charToString(0x25CF));
+                pad->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff993333));
+                break;
+            case ClipSlot::Armed:
+                pad->setButtonText("ARM");
+                pad->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff884400));
+                break;
         }
     }
 }
 
-void MainComponent::selectTrack(int index)
+// ── Plugin ───────────────────────────────────────────────────────────────────
+
+void MainComponent::scanPlugins()
 {
-    selectedTrackIndex = index;
-    pluginHost.setSelectedTrack(index);
-    for (int i = 0; i < trackComponents.size(); ++i)
-        trackComponents[i]->setSelected(i == index);
+    statusLabel.setText("Scanning plugins...", juce::dontSendNotification);
+    repaint();
 
-    auto& track = pluginHost.getTrack(index);
-    openEditorButton.setEnabled(track.plugin != nullptr);
-    testNoteButton.setEnabled(track.plugin != nullptr);
+    pluginHost.scanForPlugins();
 
-    // Reset plugin selector so user can load a plugin on this track
+    pluginSelector.clear(juce::dontSendNotification);
+    pluginDescriptions.clear();
+    pluginSelector.addItem("-- Plugin --", 1);
+
+    int id = 2;
+    for (const auto& desc : pluginHost.getPluginList().getTypes())
+    {
+        if (desc.isInstrument)
+        {
+            pluginSelector.addItem(desc.name, id);
+            pluginDescriptions.add(desc);
+            id++;
+        }
+    }
     pluginSelector.setSelectedId(1, juce::dontSendNotification);
+}
+
+void MainComponent::loadSelectedPlugin()
+{
+    int idx = pluginSelector.getSelectedId() - 2;
+    if (idx < 0 || idx >= pluginDescriptions.size()) return;
 
     closePluginEditor();
+    audioPlayer.setProcessor(nullptr);
+
+    juce::String err;
+    bool ok = pluginHost.loadPlugin(selectedTrackIndex, pluginDescriptions[idx], err);
+
+    audioPlayer.setProcessor(&pluginHost);
+
+    if (ok)
+        updateTrackDisplay();
+    else
+        statusLabel.setText("Failed: " + err, juce::dontSendNotification);
+
     updateStatusLabel();
 }
 
-void MainComponent::onTrackVolumeChanged(int trackIndex, float volume)
+void MainComponent::openPluginEditor()
 {
-    auto& track = pluginHost.getTrack(trackIndex);
-    if (track.gainProcessor) track.gainProcessor->volume.store(volume);
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+    if (track.plugin == nullptr) return;
+    closePluginEditor();
+    currentEditor.reset(track.plugin->createEditorIfNeeded());
+    if (currentEditor == nullptr) return;
+    editorWindow = std::make_unique<PluginEditorWindow>(track.plugin->getName(), currentEditor.get(),
+        [this] { closePluginEditor(); });
 }
 
-void MainComponent::onTrackMuteChanged(int trackIndex, bool muted)
+void MainComponent::closePluginEditor()
 {
-    auto& track = pluginHost.getTrack(trackIndex);
-    if (track.gainProcessor) track.gainProcessor->muted.store(muted);
+    editorWindow = nullptr;
+    currentEditor = nullptr;
 }
 
-void MainComponent::onTrackSoloChanged(int trackIndex, bool soloed)
+void MainComponent::playTestNote()
 {
-    auto& track = pluginHost.getTrack(trackIndex);
-    if (track.gainProcessor)
-    {
-        bool was = track.gainProcessor->soloed.load();
-        track.gainProcessor->soloed.store(soloed);
-        if (soloed && !was) pluginHost.soloCount.fetch_add(1);
-        else if (!soloed && was) pluginHost.soloCount.fetch_sub(1);
-    }
-}
-
-void MainComponent::onTrackArmChanged(int trackIndex, bool armed)
-{
-    auto* cp = pluginHost.getTrack(trackIndex).clipPlayer;
-    if (cp) cp->armed.store(armed);
+    pluginHost.sendTestNoteOn(60, 0.78f);
+    juce::Timer::callAfterDelay(500, [this] { pluginHost.sendTestNoteOff(60); });
 }
 
 // ── MIDI ─────────────────────────────────────────────────────────────────────
@@ -308,7 +390,6 @@ void MainComponent::selectMidiDevice()
 
     if (selectedId == 2)
     {
-        // Computer keyboard mode
         useComputerKeyboard = true;
         setWantsKeyboardFocus(true);
         grabKeyboardFocus();
@@ -335,81 +416,6 @@ void MainComponent::disableCurrentMidiDevice()
     }
 }
 
-// ── Plugin ───────────────────────────────────────────────────────────────────
-
-void MainComponent::scanPlugins()
-{
-    statusLabel.setText("Scanning plugins...", juce::dontSendNotification);
-    repaint();
-    pluginHost.scanForPlugins();
-    pluginSelector.clear(juce::dontSendNotification);
-    pluginDescriptions.clear();
-    pluginSelector.addItem("-- Select Plugin --", 1);
-    int id = 2;
-    for (const auto& desc : pluginHost.getPluginList().getTypes())
-    {
-        if (desc.isInstrument)
-        {
-            pluginSelector.addItem(desc.name, id);
-            pluginDescriptions.add(desc);
-            id++;
-        }
-    }
-    pluginSelector.setSelectedId(1, juce::dontSendNotification);
-}
-
-void MainComponent::loadSelectedPlugin()
-{
-    int idx = pluginSelector.getSelectedId() - 2;
-    if (idx < 0 || idx >= pluginDescriptions.size())
-    {
-        openEditorButton.setEnabled(false);
-        testNoteButton.setEnabled(false);
-        return;
-    }
-    closePluginEditor();
-    audioPlayer.setProcessor(nullptr);
-    juce::String err;
-    bool ok = pluginHost.loadPlugin(selectedTrackIndex, pluginDescriptions[idx], err);
-    audioPlayer.setProcessor(&pluginHost);
-    if (ok)
-    {
-        openEditorButton.setEnabled(true);
-        testNoteButton.setEnabled(true);
-        trackComponents[selectedTrackIndex]->setPluginName(pluginDescriptions[idx].name);
-        updateStatusLabel();
-    }
-    else
-    {
-        openEditorButton.setEnabled(false);
-        testNoteButton.setEnabled(false);
-        statusLabel.setText("Failed: " + err, juce::dontSendNotification);
-    }
-}
-
-void MainComponent::openPluginEditor()
-{
-    auto& track = pluginHost.getTrack(selectedTrackIndex);
-    if (track.plugin == nullptr) return;
-    closePluginEditor();
-    currentEditor.reset(track.plugin->createEditorIfNeeded());
-    if (currentEditor == nullptr) { statusLabel.setText("No editor", juce::dontSendNotification); return; }
-    editorWindow = std::make_unique<PluginEditorWindow>(track.plugin->getName(), currentEditor.get(),
-        [this] { closePluginEditor(); });
-}
-
-void MainComponent::closePluginEditor()
-{
-    editorWindow = nullptr;
-    currentEditor = nullptr;
-}
-
-void MainComponent::playTestNote()
-{
-    pluginHost.sendTestNoteOn(60, 0.78f);
-    juce::Timer::callAfterDelay(500, [this] { pluginHost.sendTestNoteOff(60); });
-}
-
 void MainComponent::showAudioSettings()
 {
     auto* sel = new juce::AudioDeviceSelectorComponent(deviceManager, 0, 0, 1, 2, false, false, false, false);
@@ -432,17 +438,15 @@ void MainComponent::showAudioSettings()
 
 void MainComponent::updateStatusLabel()
 {
-    juce::String text = "Track " + juce::String(selectedTrackIndex + 1) + " | ";
-    auto& track = pluginHost.getTrack(selectedTrackIndex);
-    text += (track.plugin ? "Loaded: " + track.plugin->getName() : juce::String("No plugin")) + " | ";
+    juce::String text;
     if (useComputerKeyboard)
-        text += "MIDI: Computer KB (Oct " + juce::String(computerKeyboardOctave) + ") | ";
+        text += "KB Oct " + juce::String(computerKeyboardOctave) + " | ";
     else if (currentMidiDeviceId.isNotEmpty())
         for (const auto& d : midiDevices)
-            if (d.identifier == currentMidiDeviceId) { text += "MIDI: " + d.name + " | "; break; }
+            if (d.identifier == currentMidiDeviceId) { text += d.name + " | "; break; }
+
     if (auto* dev = deviceManager.getCurrentAudioDevice())
         text += dev->getName() + " | " + juce::String(dev->getCurrentSampleRate(), 0) + " Hz";
-    else text += "No audio device";
     statusLabel.setText(text, juce::dontSendNotification);
 }
 
@@ -450,114 +454,108 @@ void MainComponent::updateStatusLabel()
 
 void MainComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
+    g.fillAll(juce::Colour(0xff1a1a1a));
+
+    // Divider lines
+    g.setColour(juce::Colour(0xff333333));
+
+    auto area = getLocalBounds();
+    int topBarH = 50;
+    g.drawHorizontalLine(topBarH, 0, static_cast<float>(getWidth()));
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(8);
+    auto area = getLocalBounds();
+    int topBarH = 50;
+    int bottomBarH = 45;
+    int rightPanelW = 200;
+    int timelineH = juce::jmax(120, area.getHeight() / 4);
 
-    // Top controls — 2 rows
-    auto row1 = area.removeFromTop(28);
-    midiRefreshButton.setBounds(row1.removeFromRight(65));
-    row1.removeFromRight(4);
-    auto midiArea = row1.removeFromLeft(row1.getWidth() / 2);
-    midiInputSelector.setBounds(midiArea);
-    row1.removeFromLeft(4);
-    openEditorButton.setBounds(row1.removeFromRight(80));
-    row1.removeFromRight(4);
-    pluginSelector.setBounds(row1);
-    area.removeFromTop(4);
+    // ── Top Bar ──
+    auto topBar = area.removeFromTop(topBarH).reduced(6, 6);
 
-    auto row2 = area.removeFromTop(28);
-    audioSettingsButton.setBounds(row2.removeFromLeft(110));
-    row2.removeFromLeft(4);
-    testNoteButton.setBounds(row2.removeFromLeft(100));
-    area.removeFromTop(6);
+    prevTrackButton.setBounds(topBar.removeFromLeft(40));
+    topBar.removeFromLeft(4);
+    nextTrackButton.setBounds(topBar.removeFromLeft(40));
+    topBar.removeFromLeft(8);
+    trackNameLabel.setBounds(topBar.removeFromLeft(200));
+    topBar.removeFromLeft(8);
 
-    // Transport bar
-    auto transport = area.removeFromBottom(32);
-    recordButton.setBounds(transport.removeFromLeft(50));
-    transport.removeFromLeft(4);
-    playButton.setBounds(transport.removeFromLeft(55));
-    transport.removeFromLeft(4);
-    stopButton.setBounds(transport.removeFromLeft(55));
-    transport.removeFromLeft(4);
-    metronomeButton.setBounds(transport.removeFromLeft(45));
-    transport.removeFromLeft(8);
-    bpmLabel.setBounds(transport.removeFromLeft(35));
-    bpmSlider.setBounds(transport.removeFromLeft(150));
-    transport.removeFromLeft(8);
-    beatLabel.setBounds(transport.removeFromLeft(100));
+    recordButton.setBounds(topBar.removeFromLeft(55));
+    topBar.removeFromLeft(4);
+    playButton.setBounds(topBar.removeFromLeft(60));
+    topBar.removeFromLeft(4);
+    stopButton.setBounds(topBar.removeFromLeft(55));
+    topBar.removeFromLeft(4);
+    metronomeButton.setBounds(topBar.removeFromLeft(45));
+    topBar.removeFromLeft(8);
+
+    beatLabel.setBounds(topBar.removeFromRight(90));
+    bpmSlider.setBounds(topBar);
+
+    // ── Bottom Bar ──
+    auto bottomBar = area.removeFromBottom(bottomBarH).reduced(8, 6);
+
+    auto volArea = bottomBar.removeFromLeft(150);
+    volumeSlider.setBounds(volArea);
+
+    bottomBar.removeFromLeft(8);
+    auto panArea = bottomBar.removeFromLeft(100);
+    panSlider.setBounds(panArea);
+
+    bottomBar.removeFromLeft(8);
+    muteButton.setBounds(bottomBar.removeFromLeft(35));
+    bottomBar.removeFromLeft(4);
+    soloButton.setBounds(bottomBar.removeFromLeft(35));
+    bottomBar.removeFromLeft(4);
+    armButton.setBounds(bottomBar.removeFromLeft(50));
+    bottomBar.removeFromLeft(8);
+    statusLabel.setBounds(bottomBar);
+
+    // ── Timeline (bottom section) ──
+    auto timelineArea = area.removeFromBottom(timelineH);
+    if (timelineComponent)
+        timelineComponent->setBounds(timelineArea);
+
     area.removeFromBottom(4);
 
-    // Status bar
-    statusLabel.setBounds(area.removeFromBottom(22));
-    area.removeFromBottom(4);
+    // ── Right Panel ──
+    auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
 
-    // Top half: track list (left) + clip grid (right)
-    int trackListWidth = 280;
-    int clipGridWidth = ClipPlayerNode::NUM_SLOTS * 60;
-    int trackHeight = 32;
-    int totalHeight = PluginHost::NUM_TRACKS * trackHeight;
+    pluginSelector.setBounds(rightPanel.removeFromTop(32));
+    rightPanel.removeFromTop(6);
+    openEditorButton.setBounds(rightPanel.removeFromTop(36));
+    rightPanel.removeFromTop(6);
+    testNoteButton.setBounds(rightPanel.removeFromTop(36));
+    rightPanel.removeFromTop(12);
+    midiInputSelector.setBounds(rightPanel.removeFromTop(32));
+    rightPanel.removeFromTop(6);
+    audioSettingsButton.setBounds(rightPanel.removeFromTop(36));
 
-    // Split remaining area: top half for tracks/clips, bottom half for timeline
-    auto topHalf = area.removeFromTop(juce::jmax(200, area.getHeight() / 2));
-    area.removeFromTop(4);
+    // ── Clip Pads (4 big squares in remaining center area) ──
+    area.reduce(8, 8);
+    int padSize = juce::jmin(area.getWidth() / 4 - 8, area.getHeight() - 8);
+    int totalPadWidth = padSize * 4 + 24;
+    int padStartX = area.getX() + (area.getWidth() - totalPadWidth) / 2;
+    int padY = area.getY() + (area.getHeight() - padSize) / 2;
 
-    trackViewport.setBounds(topHalf.removeFromLeft(trackListWidth));
-    topHalf.removeFromLeft(4);
-    auto clipArea = topHalf.removeFromLeft(clipGridWidth);
-
-    trackListContainer.setSize(trackListWidth - trackViewport.getScrollBarThickness(), totalHeight);
-
-    for (int i = 0; i < trackComponents.size(); ++i)
-        trackComponents[i]->setBounds(0, i * trackHeight, trackListContainer.getWidth(), trackHeight);
-
-    // Position clip buttons directly in the main component
-    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+    for (int s = 0; s < clipPads.size(); ++s)
     {
-        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
-        {
-            int idx = t * ClipPlayerNode::NUM_SLOTS + s;
-            clipButtons[idx]->setBounds(
-                clipArea.getX() + s * 60 + 2,
-                clipArea.getY() + t * trackHeight + 2,
-                56, trackHeight - 4);
-        }
+        clipPads[s]->setBounds(padStartX + s * (padSize + 8), padY, padSize, padSize);
     }
-
-    // Bottom: timeline arrangement view
-    if (timelineComponent != nullptr)
-        timelineComponent->setBounds(area);
 }
 
-// ── Computer Keyboard MIDI ───────────────────────────────────────────────────
+// ── Keyboard MIDI + Transport ────────────────────────────────────────────────
 
 int MainComponent::keyToNote(int keyCode) const
 {
-    // QWERTY layout:
-    // Black keys: W E   T Y U   O P
-    // White keys: A S D F G H J K L
-    // Z = octave down, X = octave up
     switch (keyCode)
     {
-        case 'A': return 0;   // C
-        case 'W': return 1;   // C#
-        case 'S': return 2;   // D
-        case 'E': return 3;   // D#
-        case 'D': return 4;   // E
-        case 'F': return 5;   // F
-        case 'T': return 6;   // F#
-        case 'G': return 7;   // G
-        case 'Y': return 8;   // G#
-        case 'H': return 9;   // A
-        case 'U': return 10;  // A#
-        case 'J': return 11;  // B
-        case 'K': return 12;  // C (next octave)
-        case 'O': return 13;  // C#
-        case 'L': return 14;  // D
-        case 'P': return 15;  // D#
+        case 'A': return 0;  case 'W': return 1;  case 'S': return 2;  case 'E': return 3;
+        case 'D': return 4;  case 'F': return 5;  case 'T': return 6;  case 'G': return 7;
+        case 'Y': return 8;  case 'H': return 9;  case 'U': return 10; case 'J': return 11;
+        case 'K': return 12; case 'O': return 13; case 'L': return 14; case 'P': return 15;
         default: return -1;
     }
 }
@@ -578,7 +576,7 @@ void MainComponent::sendNoteOff(int note)
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
-    // Spacebar = play/stop toggle, double-tap resets to start
+    // Spacebar = play/stop
     if (key == juce::KeyPress::spaceKey)
     {
         auto& eng = pluginHost.getEngine();
@@ -588,7 +586,6 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         }
         else
         {
-            // Already stopped — check if this is a quick second tap (reset to start)
             double timeSinceLastStop = juce::Time::getMillisecondCounterHiRes() - lastSpaceStopTime;
             if (timeSinceLastStop < 400.0)
             {
@@ -598,9 +595,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
                     auto* cp = pluginHost.getTrack(t).clipPlayer;
                     if (cp) cp->stopAllSlots();
                 }
-                updateClipButtons();
-                if (timelineComponent != nullptr)
-                    timelineComponent->repaint();
+                updateClipPads();
+                if (timelineComponent) timelineComponent->repaint();
             }
             else
             {
@@ -611,23 +607,25 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         return true;
     }
 
+    // Left/Right arrows = switch tracks
+    if (key == juce::KeyPress::leftKey) { selectTrack(selectedTrackIndex - 1); return true; }
+    if (key == juce::KeyPress::rightKey) { selectTrack(selectedTrackIndex + 1); return true; }
+
     if (!useComputerKeyboard) return false;
 
     int keyCode = key.getTextCharacter();
-    if (keyCode >= 'a' && keyCode <= 'z') keyCode -= 32; // uppercase
+    if (keyCode >= 'a' && keyCode <= 'z') keyCode -= 32;
 
-    // Octave shift
     if (keyCode == 'Z') { computerKeyboardOctave = juce::jmax(0, computerKeyboardOctave - 1); updateStatusLabel(); return true; }
     if (keyCode == 'X') { computerKeyboardOctave = juce::jmin(8, computerKeyboardOctave + 1); updateStatusLabel(); return true; }
 
-    return false; // let keyStateChanged handle note keys
+    return false;
 }
 
 bool MainComponent::keyStateChanged(bool /*isKeyDown*/)
 {
     if (!useComputerKeyboard) return false;
 
-    // Check all mapped keys and compare with tracked state
     const int mappedKeys[] = { 'A','W','S','E','D','F','T','G','Y','H','U','J','K','O','L','P' };
 
     for (int keyCode : mappedKeys)
@@ -641,17 +639,8 @@ bool MainComponent::keyStateChanged(bool /*isKeyDown*/)
 
         bool wasDown = keysCurrentlyDown.count(keyCode) > 0;
 
-        if (isDown && !wasDown)
-        {
-            keysCurrentlyDown.insert(keyCode);
-            sendNoteOn(midiNote);
-        }
-        else if (!isDown && wasDown)
-        {
-            keysCurrentlyDown.erase(keyCode);
-            sendNoteOff(midiNote);
-        }
+        if (isDown && !wasDown) { keysCurrentlyDown.insert(keyCode); sendNoteOn(midiNote); }
+        else if (!isDown && wasDown) { keysCurrentlyDown.erase(keyCode); sendNoteOff(midiNote); }
     }
-
     return true;
 }
