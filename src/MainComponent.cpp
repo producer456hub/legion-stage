@@ -379,9 +379,6 @@ void MainComponent::timerCallback()
         updateStatusLabel();
     }
 
-    // Repaint mini mixer
-    if (!miniMixerBounds.isEmpty())
-        repaint(miniMixerBounds);
 }
 
 // ── Track Selection ──────────────────────────────────────────────────────────
@@ -917,18 +914,6 @@ void MainComponent::loadProject()
 void MainComponent::mouseDown(const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
-
-    // Check if click is in the mini mixer area
-    if (!miniMixerBounds.isEmpty() && miniMixerBounds.contains(e.x, e.y))
-    {
-        int barWidth = juce::jmax(1, (miniMixerBounds.getWidth() - 2) / 16);
-        int trackIdx = (e.x - miniMixerBounds.getX()) / barWidth;
-        if (trackIdx >= 0 && trackIdx < PluginHost::NUM_TRACKS)
-        {
-            selectTrack(trackIdx);
-            repaint(miniMixerBounds);
-        }
-    }
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -936,67 +921,6 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillAll(juce::Colour(0xff1a1a1a));
     g.setColour(juce::Colour(0xff333333));
     g.drawHorizontalLine(50, 0, static_cast<float>(getWidth()));
-    drawMiniMixer(g);
-}
-
-void MainComponent::drawMiniMixer(juce::Graphics& g)
-{
-    if (miniMixerBounds.isEmpty()) return;
-
-    auto area = miniMixerBounds;
-    int barWidth = juce::jmax(1, (area.getWidth()) / 16);
-    int barH = area.getHeight();
-
-    // Background
-    g.setColour(juce::Colour(0xff1e1e1e));
-    g.fillRect(area);
-
-    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
-    {
-        auto& track = pluginHost.getTrack(t);
-        int x = area.getX() + t * barWidth;
-        float vol = 0.0f;
-
-        if (track.gainProcessor)
-        {
-            vol = track.gainProcessor->volume.load();
-            if (track.gainProcessor->muted.load()) vol = 0.0f;
-        }
-
-        int filledW = static_cast<int>(vol * (barWidth - 2));
-
-        bool isSelected = (t == selectedTrackIndex);
-        bool hasPlugin = (track.plugin != nullptr);
-        bool isArmed = track.clipPlayer && track.clipPlayer->armed.load();
-
-        // Background per track
-        g.setColour(juce::Colour(0xff2a2a2a));
-        g.fillRect(x + 1, area.getY() + 1, barWidth - 2, barH - 2);
-
-        // Level fill
-        if (isArmed)
-            g.setColour(juce::Colours::red.darker());
-        else if (isSelected)
-            g.setColour(juce::Colour(0xff4488cc));
-        else if (hasPlugin)
-            g.setColour(juce::Colour(0xff448844));
-        else
-            g.setColour(juce::Colour(0xff333333));
-
-        g.fillRect(x + 1, area.getY() + 1, filledW, barH - 2);
-
-        // Selected border
-        if (isSelected)
-        {
-            g.setColour(juce::Colours::white);
-            g.drawRect(x, area.getY(), barWidth, barH, 1);
-        }
-
-        // Track number
-        g.setColour(juce::Colour(0xffcccccc));
-        g.setFont(10.0f);
-        g.drawText(juce::String(t + 1), x, area.getY(), barWidth, barH, juce::Justification::centred);
-    }
 }
 
 void MainComponent::resized()
@@ -1120,12 +1044,8 @@ void MainComponent::resized()
         }
     }
 
-    // ── Mini mixer as horizontal strip above timeline ──
-    area.reduce(2, 2);
-    miniMixerBounds = area.removeFromTop(30).toNearestInt();
-    area.removeFromTop(2);
-
     // ── Timeline fills the rest ──
+    area.reduce(2, 2);
     if (timelineComponent)
         timelineComponent->setBounds(area);
 }

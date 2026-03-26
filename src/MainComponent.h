@@ -108,9 +108,6 @@ private:
     void saveProject();
     void loadProject();
 
-    // ── Mini Mixer (horizontal strip above timeline) ──
-    void drawMiniMixer(juce::Graphics& g);
-    juce::Rectangle<int> miniMixerBounds;
 
     // ── Plugin Parameters ──
     static constexpr int NUM_PARAM_SLIDERS = 6;
