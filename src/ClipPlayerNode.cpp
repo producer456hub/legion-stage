@@ -194,11 +194,11 @@ void ClipPlayerNode::triggerSlot(int slotIndex)
 
     if (currentState == ClipSlot::Recording)
     {
-        // Click recording slot → stop recording
-        slot.state.store(ClipSlot::Stopped);
+        // Click recording slot → stop recording, auto-set to Playing
         recordingSlot = -1;
         if (slot.clip != nullptr)
             slot.clip->events.sort();
+        slot.state.store(slot.hasContent() ? ClipSlot::Playing : ClipSlot::Empty);
         return;
     }
 
@@ -263,7 +263,8 @@ void ClipPlayerNode::stopSlot(int slotIndex)
         recordingSlot = -1;
         if (slot.clip != nullptr)
             slot.clip->events.sort();
-        slot.state.store(slot.hasContent() ? ClipSlot::Stopped : ClipSlot::Empty);
+        // After recording, go to Playing so the clip plays back on next transport start
+        slot.state.store(slot.hasContent() ? ClipSlot::Playing : ClipSlot::Empty);
         sendAllNotesOff.store(true);
     }
 }
