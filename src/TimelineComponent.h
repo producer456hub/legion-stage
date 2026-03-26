@@ -91,6 +91,13 @@ private:
     juce::Rectangle<int> getSelectButtonRect(int trackIndex) const;
     void handleTrackControlClick(int trackIndex, float x, float y);
 
+    // Long press detection for arm lock
+    int longPressTrack = -1;
+    juce::Point<float> longPressPos;
+    juce::int64 mouseDownTime = 0;
+    bool longPressTriggered = false;
+    static constexpr int longPressMs = 500;
+
     // Coordinate conversion
     float beatToX(double beat) const;
     double xToBeat(float x) const;

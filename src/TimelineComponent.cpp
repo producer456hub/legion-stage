@@ -142,7 +142,22 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& e)
     {
         int trackIdx = yToTrack(my);
         if (trackIdx >= 0 && trackIdx < PluginHost::NUM_TRACKS)
-            handleTrackControlClick(trackIdx, mx, my);
+        {
+            // Check if pressing the ARM button — start long press timer
+            auto armRect = getArmButtonRect(trackIdx);
+            if (armRect.toFloat().contains(mx, my))
+            {
+                longPressTrack = trackIdx;
+                longPressPos = { mx, my };
+                mouseDownTime = juce::Time::currentTimeMillis();
+                longPressTriggered = false;
+                // Don't handle yet — wait for mouseUp to distinguish tap vs long press
+            }
+            else
+            {
+                handleTrackControlClick(trackIdx, mx, my);
+            }
+        }
         return;
     }
     auto hit = hitTestClip(mx, my);
@@ -283,6 +298,32 @@ void TimelineComponent::mouseDrag(const juce::MouseEvent& e)
 
 void TimelineComponent::mouseUp(const juce::MouseEvent& /*e*/)
 {
+    // Handle ARM button release — distinguish tap vs long press
+    if (longPressTrack >= 0)
+    {
+        auto& track = pluginHost.getTrack(longPressTrack);
+        juce::int64 holdTime = juce::Time::currentTimeMillis() - mouseDownTime;
+
+        if (holdTime >= longPressMs)
+        {
+            // Long press = toggle lock-arm
+            if (track.clipPlayer != nullptr)
+            {
+                bool wasLocked = track.clipPlayer->armLocked.load();
+                track.clipPlayer->armLocked.store(!wasLocked);
+                track.clipPlayer->armed.store(!wasLocked);
+            }
+        }
+        else
+        {
+            // Short tap = select track (auto-arms)
+            pluginHost.setSelectedTrack(longPressTrack);
+        }
+
+        longPressTrack = -1;
+        repaint();
+    }
+
     dragMode = NoDrag;
     dragClip = {};
 }
@@ -760,26 +801,18 @@ void TimelineComponent::handleTrackControlClick(int trackIndex, float x, float y
 {
     auto& track = pluginHost.getTrack(trackIndex);
 
-    // Check ARM button — shift+click locks arm, regular click selects+arms
+    // ARM button is handled in mouseDown/mouseUp for long press detection
+    // Shift+click still works as a shortcut
     auto armRect = getArmButtonRect(trackIndex);
     if (armRect.toFloat().contains(x, y))
     {
-        if (track.clipPlayer != nullptr)
+        if (track.clipPlayer != nullptr && juce::ModifierKeys::currentModifiers.isShiftDown())
         {
-            if (juce::ModifierKeys::currentModifiers.isShiftDown())
-            {
-                // Shift+click = toggle lock-arm (stays armed when switching tracks)
-                bool wasLocked = track.clipPlayer->armLocked.load();
-                track.clipPlayer->armLocked.store(!wasLocked);
-                track.clipPlayer->armed.store(!wasLocked);
-            }
-            else
-            {
-                // Regular click = select track (auto-arms via setSelectedTrack)
-                pluginHost.setSelectedTrack(trackIndex);
-            }
+            bool wasLocked = track.clipPlayer->armLocked.load();
+            track.clipPlayer->armLocked.store(!wasLocked);
+            track.clipPlayer->armed.store(!wasLocked);
+            repaint();
         }
-        repaint();
         return;
     }
 
