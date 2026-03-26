@@ -5,3 +5,4 @@ build/
 CMakeSettings.json
 out/
 libs/asio-sdk/
+ci-debug.log
