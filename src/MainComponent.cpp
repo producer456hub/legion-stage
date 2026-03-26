@@ -252,7 +252,8 @@ MainComponent::MainComponent()
         if (track.plugin == nullptr || presetList.isEmpty()) return;
 
         currentPresetIndex = juce::jmax(0, currentPresetIndex - 1);
-        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index);
+        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index,
+            &pluginHost.getMidiCollector());
         presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
             + " " + presetList[currentPresetIndex].name, juce::dontSendNotification);
     };
@@ -264,7 +265,8 @@ MainComponent::MainComponent()
         if (track.plugin == nullptr || presetList.isEmpty()) return;
 
         currentPresetIndex = juce::jmin(presetList.size() - 1, currentPresetIndex + 1);
-        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index);
+        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index,
+            &pluginHost.getMidiCollector());
         presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
             + " " + presetList[currentPresetIndex].name, juce::dontSendNotification);
     };
@@ -425,7 +427,9 @@ void MainComponent::updateTrackDisplay()
     }
     else if (track.plugin != nullptr)
     {
-        presetNameLabel.setText("No presets found", juce::dontSendNotification);
+        // Show debug info
+        presetNameLabel.setText("Progs:" + juce::String(track.plugin->getNumPrograms())
+            + " P0:" + track.plugin->getProgramName(0), juce::dontSendNotification);
         prevPresetButton.setEnabled(false);
         nextPresetButton.setEnabled(false);
     }

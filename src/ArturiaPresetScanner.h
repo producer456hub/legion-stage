@@ -53,14 +53,35 @@ public:
         return presets;
     }
 
-    // Load preset by index using program change
-    static void loadPreset(juce::AudioProcessor* plugin, int index)
+    // Load preset by index — tries multiple methods
+    static void loadPreset(juce::AudioProcessor* plugin, int index,
+                           juce::MidiMessageCollector* midiCollector = nullptr)
     {
         if (plugin == nullptr) return;
 
+        // Method 1: Standard program change API
         if (plugin->getNumPrograms() > 1)
         {
             plugin->setCurrentProgram(index);
+        }
+
+        // Method 2: Send MIDI Program Change (works with Diva, many others)
+        if (midiCollector != nullptr && index >= 0 && index <= 127)
+        {
+            // Send bank select + program change
+            int bank = index / 128;
+            int prog = index % 128;
+
+            if (bank > 0)
+            {
+                auto bankMsb = juce::MidiMessage::controllerEvent(1, 0, bank);
+                bankMsb.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+                midiCollector->addMessageToQueue(bankMsb);
+            }
+
+            auto pc = juce::MidiMessage::programChange(1, prog);
+            pc.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+            midiCollector->addMessageToQueue(pc);
         }
     }
 
