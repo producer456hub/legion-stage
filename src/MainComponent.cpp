@@ -66,6 +66,28 @@ MainComponent::MainComponent()
     metronomeButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff886600));
     metronomeButton.onClick = [this] { pluginHost.getEngine().toggleMetronome(); };
 
+    addAndMakeVisible(viewToggleButton);
+    viewToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555555));
+    viewToggleButton.onClick = [this] {
+        if (viewMode == SessionView)
+        {
+            viewMode = ArrangementView;
+            viewToggleButton.setButtonText("SES");
+            // Hide clip pads, show timeline full
+            for (auto* pad : clipPads) pad->setVisible(false);
+            if (timelineComponent) timelineComponent->setVisible(true);
+        }
+        else
+        {
+            viewMode = SessionView;
+            viewToggleButton.setButtonText("ARR");
+            // Show clip pads, hide timeline
+            for (auto* pad : clipPads) pad->setVisible(true);
+            if (timelineComponent) timelineComponent->setVisible(false);
+        }
+        resized();
+    };
+
     addAndMakeVisible(bpmSlider);
     bpmSlider.setRange(20.0, 300.0, 1.0);
     bpmSlider.setValue(120.0, juce::dontSendNotification);
@@ -165,6 +187,7 @@ MainComponent::MainComponent()
     // ── Timeline ──
     timelineComponent = std::make_unique<TimelineComponent>(pluginHost);
     addAndMakeVisible(*timelineComponent);
+    timelineComponent->setVisible(false);  // Start in Session view
 
     setSize(1280, 800);  // Legion Go native-ish
     setWantsKeyboardFocus(true);
@@ -489,6 +512,8 @@ void MainComponent::resized()
     stopButton.setBounds(topBar.removeFromLeft(55));
     topBar.removeFromLeft(4);
     metronomeButton.setBounds(topBar.removeFromLeft(45));
+    topBar.removeFromLeft(4);
+    viewToggleButton.setBounds(topBar.removeFromLeft(45));
     topBar.removeFromLeft(8);
 
     beatLabel.setBounds(topBar.removeFromRight(90));
@@ -513,14 +538,7 @@ void MainComponent::resized()
     bottomBar.removeFromLeft(8);
     statusLabel.setBounds(bottomBar);
 
-    // ── Timeline (bottom section) ──
-    auto timelineArea = area.removeFromBottom(timelineH);
-    if (timelineComponent)
-        timelineComponent->setBounds(timelineArea);
-
-    area.removeFromBottom(4);
-
-    // ── Right Panel ──
+    // ── Right Panel (always visible) ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
 
     pluginSelector.setBounds(rightPanel.removeFromTop(32));
@@ -533,16 +551,32 @@ void MainComponent::resized()
     rightPanel.removeFromTop(6);
     audioSettingsButton.setBounds(rightPanel.removeFromTop(36));
 
-    // ── Clip Pads (4 big squares in remaining center area) ──
-    area.reduce(8, 8);
-    int padSize = juce::jmin(area.getWidth() / 4 - 8, area.getHeight() - 8);
-    int totalPadWidth = padSize * 4 + 24;
-    int padStartX = area.getX() + (area.getWidth() - totalPadWidth) / 2;
-    int padY = area.getY() + (area.getHeight() - padSize) / 2;
+    // ── Main Content Area — switches based on view mode ──
+    area.reduce(4, 4);
 
-    for (int s = 0; s < clipPads.size(); ++s)
+    if (viewMode == SessionView)
     {
-        clipPads[s]->setBounds(padStartX + s * (padSize + 8), padY, padSize, padSize);
+        // Clip pads fill the center
+        int padSize = juce::jmin(area.getWidth() / 4 - 8, area.getHeight() - 8);
+        if (padSize < 50) padSize = 50;
+        int totalPadWidth = padSize * 4 + 24;
+        int padStartX = area.getX() + (area.getWidth() - totalPadWidth) / 2;
+        int padY = area.getY() + (area.getHeight() - padSize) / 2;
+
+        for (int s = 0; s < clipPads.size(); ++s)
+            clipPads[s]->setBounds(padStartX + s * (padSize + 8), padY, padSize, padSize);
+
+        if (timelineComponent)
+            timelineComponent->setBounds(0, 0, 0, 0);
+    }
+    else
+    {
+        // Timeline fills the center
+        if (timelineComponent)
+            timelineComponent->setBounds(area);
+
+        for (auto* pad : clipPads)
+            pad->setBounds(0, 0, 0, 0);
     }
 }
 

@@ -43,6 +43,11 @@ private:
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;
 
+    // View mode
+    enum ViewMode { SessionView, ArrangementView };
+    ViewMode viewMode = SessionView;
+    juce::TextButton viewToggleButton { "ARR" };
+
     // Current track
     int selectedTrackIndex = 0;
 
