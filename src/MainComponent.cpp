@@ -249,58 +249,24 @@ MainComponent::MainComponent()
     prevPresetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444455));
     prevPresetButton.onClick = [this] {
         auto& track = pluginHost.getTrack(selectedTrackIndex);
-        if (track.plugin == nullptr) return;
+        if (track.plugin == nullptr || presetList.isEmpty()) return;
 
-        if (!arturiaPresets.isEmpty())
-        {
-            // Arturia preset browsing
-            arturiaPresetIndex = juce::jmax(0, arturiaPresetIndex - 1);
-            ArturiaPresetScanner::loadPreset(track.plugin, arturiaPresets[arturiaPresetIndex].file);
-            presetNameLabel.setText(arturiaPresets[arturiaPresetIndex].name, juce::dontSendNotification);
-        }
-        else
-        {
-            // Standard program change
-            int current = track.plugin->getCurrentProgram();
-            int numPrograms = track.plugin->getNumPrograms();
-            if (numPrograms > 1)
-            {
-                int newProg = (current > 0) ? current - 1 : numPrograms - 1;
-                track.plugin->setCurrentProgram(newProg);
-            }
-            juce::String name = track.plugin->getProgramName(track.plugin->getCurrentProgram());
-            if (name.isEmpty()) name = "Preset " + juce::String(track.plugin->getCurrentProgram() + 1);
-            presetNameLabel.setText(name, juce::dontSendNotification);
-        }
+        currentPresetIndex = juce::jmax(0, currentPresetIndex - 1);
+        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index);
+        presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
+            + " " + presetList[currentPresetIndex].name, juce::dontSendNotification);
     };
 
     addAndMakeVisible(nextPresetButton);
     nextPresetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444455));
     nextPresetButton.onClick = [this] {
         auto& track = pluginHost.getTrack(selectedTrackIndex);
-        if (track.plugin == nullptr) return;
+        if (track.plugin == nullptr || presetList.isEmpty()) return;
 
-        if (!arturiaPresets.isEmpty())
-        {
-            // Arturia preset browsing
-            arturiaPresetIndex = juce::jmin(arturiaPresets.size() - 1, arturiaPresetIndex + 1);
-            ArturiaPresetScanner::loadPreset(track.plugin, arturiaPresets[arturiaPresetIndex].file);
-            presetNameLabel.setText(arturiaPresets[arturiaPresetIndex].name, juce::dontSendNotification);
-        }
-        else
-        {
-            // Standard program change
-            int current = track.plugin->getCurrentProgram();
-            int numPrograms = track.plugin->getNumPrograms();
-            if (numPrograms > 1)
-            {
-                int newProg = (current < numPrograms - 1) ? current + 1 : 0;
-                track.plugin->setCurrentProgram(newProg);
-            }
-            juce::String name = track.plugin->getProgramName(track.plugin->getCurrentProgram());
-            if (name.isEmpty()) name = "Preset " + juce::String(track.plugin->getCurrentProgram() + 1);
-            presetNameLabel.setText(name, juce::dontSendNotification);
-        }
+        currentPresetIndex = juce::jmin(presetList.size() - 1, currentPresetIndex + 1);
+        PresetBrowser::loadPreset(track.plugin, presetList[currentPresetIndex].index);
+        presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
+            + " " + presetList[currentPresetIndex].name, juce::dontSendNotification);
     };
 
     addAndMakeVisible(presetNameLabel);
@@ -445,30 +411,23 @@ void MainComponent::updateTrackDisplay()
     info += "Armed: " + juce::String(track.clipPlayer && track.clipPlayer->armed.load() ? "Yes" : "No");
     trackInfoLabel.setText(info, juce::dontSendNotification);
 
-    // Scan for Arturia presets if plugin name matches
-    arturiaPresets.clear();
-    arturiaPresetIndex = -1;
+    // Build preset list
+    presetList = PresetBrowser::getPresets(track.plugin);
+    currentPresetIndex = track.plugin != nullptr ? track.plugin->getCurrentProgram() : -1;
+    if (currentPresetIndex >= presetList.size()) currentPresetIndex = 0;
 
-    if (track.plugin != nullptr)
+    if (track.plugin != nullptr && !presetList.isEmpty())
     {
-        juce::String pluginName = track.plugin->getName();
-        arturiaPresets = ArturiaPresetScanner::scanPresets(pluginName);
-
-        if (!arturiaPresets.isEmpty())
-        {
-            arturiaPresetIndex = 0;
-            presetNameLabel.setText(arturiaPresets[0].name + " (" + juce::String(arturiaPresets.size()) + ")",
-                juce::dontSendNotification);
-        }
-        else
-        {
-            juce::String presetName = track.plugin->getProgramName(track.plugin->getCurrentProgram());
-            if (presetName.isEmpty())
-                presetName = "Preset " + juce::String(track.plugin->getCurrentProgram() + 1);
-            presetNameLabel.setText(presetName, juce::dontSendNotification);
-        }
+        presetNameLabel.setText(juce::String(currentPresetIndex + 1) + "/" + juce::String(presetList.size())
+            + " " + presetList[juce::jmax(0, currentPresetIndex)].name, juce::dontSendNotification);
         prevPresetButton.setEnabled(true);
         nextPresetButton.setEnabled(true);
+    }
+    else if (track.plugin != nullptr)
+    {
+        presetNameLabel.setText("No presets found", juce::dontSendNotification);
+        prevPresetButton.setEnabled(false);
+        nextPresetButton.setEnabled(false);
     }
     else
     {

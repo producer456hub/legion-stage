@@ -4,7 +4,7 @@
 #include <set>
 #include "PluginHost.h"
 #include "PianoRollComponent.h"
-#include "ArturiaPresetScanner.h"
+#include "ArturiaPresetScanner.h" // PresetBrowser
 #include "TimelineComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
@@ -112,8 +112,8 @@ private:
     juce::TextButton prevPresetButton { "< Preset" };
     juce::TextButton nextPresetButton { "Preset >" };
     juce::Label presetNameLabel;
-    juce::Array<ArturiaPresetScanner::PresetInfo> arturiaPresets;
-    int arturiaPresetIndex = -1;
+    juce::Array<PresetBrowser::PresetInfo> presetList;
+    int currentPresetIndex = -1;
 
     // ── Right Panel — Mix + Info ──
     juce::Slider volumeSlider;
