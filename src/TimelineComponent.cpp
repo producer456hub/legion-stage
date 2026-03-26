@@ -3,6 +3,7 @@
 TimelineComponent::TimelineComponent(PluginHost& host)
     : pluginHost(host)
 {
+    setWantsKeyboardFocus(true);
     startTimerHz(30);
 }
 
@@ -23,6 +24,66 @@ int TimelineComponent::yToTrack(float y) const
     return static_cast<int>((y - headerHeight) / trackHeight);
 }
 
+// ── Hit testing ──────────────────────────────────────────────────────────────
+
+juce::Rectangle<float> TimelineComponent::getClipRect(int trackIndex, int slotIndex) const
+{
+    auto* cp = pluginHost.getTrack(trackIndex).clipPlayer;
+    if (cp == nullptr) return {};
+
+    auto& slot = cp->getSlot(slotIndex);
+    if (slot.clip == nullptr) return {};
+
+    float x1 = beatToX(slot.clip->timelinePosition);
+    float x2 = beatToX(slot.clip->timelinePosition + slot.clip->lengthInBeats);
+    float y = static_cast<float>(headerHeight + trackIndex * trackHeight + 2);
+    float h = static_cast<float>(trackHeight - 4);
+
+    return { x1, y, x2 - x1, h };
+}
+
+TimelineComponent::ClipRef TimelineComponent::hitTestClip(float x, float y) const
+{
+    int trackIdx = yToTrack(y);
+    if (trackIdx < 0 || trackIdx >= PluginHost::NUM_TRACKS) return {};
+
+    auto* cp = pluginHost.getTrack(trackIdx).clipPlayer;
+    if (cp == nullptr) return {};
+
+    for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+    {
+        auto rect = getClipRect(trackIdx, s);
+        if (!rect.isEmpty() && rect.contains(x, y))
+            return { trackIdx, s };
+    }
+    return {};
+}
+
+bool TimelineComponent::isOnClipLeftEdge(float x, const juce::Rectangle<float>& rect) const
+{
+    return x < rect.getX() + 6.0f;
+}
+
+bool TimelineComponent::isOnClipRightEdge(float x, const juce::Rectangle<float>& rect) const
+{
+    return x > rect.getRight() - 6.0f;
+}
+
+ClipSlot* TimelineComponent::getSlot(const ClipRef& ref) const
+{
+    if (!ref.isValid()) return nullptr;
+    auto* cp = pluginHost.getTrack(ref.trackIndex).clipPlayer;
+    if (cp == nullptr) return nullptr;
+    return &cp->getSlot(ref.slotIndex);
+}
+
+MidiClip* TimelineComponent::getClip(const ClipRef& ref) const
+{
+    auto* slot = getSlot(ref);
+    if (slot == nullptr) return nullptr;
+    return slot->clip.get();
+}
+
 // ── Timer ────────────────────────────────────────────────────────────────────
 
 void TimelineComponent::timerCallback()
@@ -30,15 +91,12 @@ void TimelineComponent::timerCallback()
     auto& engine = pluginHost.getEngine();
     if (engine.isPlaying())
     {
-        // Auto-scroll to follow playhead
         double pos = engine.getPositionInBeats();
         float playheadX = beatToX(pos);
         float viewWidth = static_cast<float>(getWidth());
 
         if (playheadX > viewWidth * 0.8f)
-        {
             scrollX = pos - (viewWidth * 0.2 - trackLabelWidth) / pixelsPerBeat;
-        }
         else if (playheadX < static_cast<float>(trackLabelWidth))
         {
             scrollX = pos - 1.0;
@@ -49,59 +107,406 @@ void TimelineComponent::timerCallback()
     }
 }
 
-// ── Mouse ────────────────────────────────────────────────────────────────────
+// ── Mouse handling ───────────────────────────────────────────────────────────
+
+void TimelineComponent::mouseDown(const juce::MouseEvent& e)
+{
+    grabKeyboardFocus();
+
+    if (e.x < trackLabelWidth) return;
+
+    float mx = static_cast<float>(e.x);
+    float my = static_cast<float>(e.y);
+    auto hit = hitTestClip(mx, my);
+
+    if (e.mods.isRightButtonDown() && hit.isValid())
+    {
+        // Right-click → open piano roll
+        auto* clip = getClip(hit);
+        if (clip != nullptr)
+        {
+            new PianoRollWindow("Piano Roll - Track " + juce::String(hit.trackIndex + 1)
+                + " Slot " + juce::String(hit.slotIndex + 1), *clip,
+                pluginHost.getEngine());
+        }
+        return;
+    }
+
+    if (hit.isValid())
+    {
+        selectedClip = hit;
+        dragClip = hit;
+        auto* clip = getClip(hit);
+        if (clip == nullptr) return;
+
+        clipOrigPosition = clip->timelinePosition;
+        clipOrigLength = clip->lengthInBeats;
+        dragStartBeat = xToBeat(mx);
+        dragStartTrack = yToTrack(my);
+
+        auto rect = getClipRect(hit.trackIndex, hit.slotIndex);
+        if (isOnClipRightEdge(mx, rect))
+            dragMode = ResizeClipRight;
+        else if (isOnClipLeftEdge(mx, rect))
+            dragMode = ResizeClipLeft;
+        else
+            dragMode = MoveClip;
+    }
+    else
+    {
+        selectedClip = {};
+    }
+
+    repaint();
+}
+
+void TimelineComponent::mouseDrag(const juce::MouseEvent& e)
+{
+    if (dragMode == NoDrag || !dragClip.isValid()) return;
+
+    float mx = static_cast<float>(e.x);
+    float my = static_cast<float>(e.y);
+    auto* clip = getClip(dragClip);
+    if (clip == nullptr) return;
+
+    double currentBeat = xToBeat(mx);
+
+    if (dragMode == MoveClip)
+    {
+        double beatDelta = currentBeat - dragStartBeat;
+        double newPos = clipOrigPosition + beatDelta;
+        // Snap to quarter beat
+        newPos = std::floor(newPos * 4.0 + 0.5) / 4.0;
+        if (newPos < 0.0) newPos = 0.0;
+        clip->timelinePosition = newPos;
+
+        // Check if dragged to a different track
+        int newTrack = yToTrack(my);
+        if (newTrack >= 0 && newTrack < PluginHost::NUM_TRACKS && newTrack != dragClip.trackIndex)
+        {
+            // Move clip to different track — find an empty slot
+            auto* srcCp = pluginHost.getTrack(dragClip.trackIndex).clipPlayer;
+            auto* dstCp = pluginHost.getTrack(newTrack).clipPlayer;
+
+            if (srcCp != nullptr && dstCp != nullptr)
+            {
+                int emptySlot = -1;
+                for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+                {
+                    if (!dstCp->getSlot(s).hasContent() && dstCp->getSlot(s).clip == nullptr)
+                    {
+                        emptySlot = s;
+                        break;
+                    }
+                }
+
+                if (emptySlot >= 0)
+                {
+                    // Move the clip
+                    auto& srcSlot = srcCp->getSlot(dragClip.slotIndex);
+                    auto& dstSlot = dstCp->getSlot(emptySlot);
+
+                    dstSlot.clip = std::move(srcSlot.clip);
+                    dstSlot.state.store(srcSlot.state.load());
+                    srcSlot.state.store(ClipSlot::Empty);
+
+                    dragClip.trackIndex = newTrack;
+                    dragClip.slotIndex = emptySlot;
+                    selectedClip = dragClip;
+                }
+            }
+        }
+    }
+    else if (dragMode == ResizeClipRight)
+    {
+        double newEnd = currentBeat;
+        newEnd = std::floor(newEnd * 4.0 + 0.5) / 4.0;
+        double newLength = newEnd - clip->timelinePosition;
+        if (newLength < 0.25) newLength = 0.25;
+        clip->lengthInBeats = newLength;
+    }
+    else if (dragMode == ResizeClipLeft)
+    {
+        double newStart = currentBeat;
+        newStart = std::floor(newStart * 4.0 + 0.5) / 4.0;
+        if (newStart < 0.0) newStart = 0.0;
+
+        double origEnd = clipOrigPosition + clipOrigLength;
+        double newLength = origEnd - newStart;
+        if (newLength < 0.25) newLength = 0.25;
+
+        // Shift MIDI events to compensate for the start position change
+        double shift = clip->timelinePosition - newStart;
+        if (std::abs(shift) > 0.001)
+        {
+            for (int i = 0; i < clip->events.getNumEvents(); ++i)
+            {
+                auto* event = clip->events.getEventPointer(i);
+                event->message.setTimeStamp(event->message.getTimeStamp() + shift);
+            }
+        }
+
+        clip->timelinePosition = newStart;
+        clip->lengthInBeats = newLength;
+    }
+
+    repaint();
+}
+
+void TimelineComponent::mouseUp(const juce::MouseEvent& /*e*/)
+{
+    dragMode = NoDrag;
+    dragClip = {};
+}
+
+void TimelineComponent::mouseMove(const juce::MouseEvent& e)
+{
+    float mx = static_cast<float>(e.x);
+    float my = static_cast<float>(e.y);
+    auto hit = hitTestClip(mx, my);
+
+    if (hit.isValid())
+    {
+        auto rect = getClipRect(hit.trackIndex, hit.slotIndex);
+        if (isOnClipRightEdge(mx, rect) || isOnClipLeftEdge(mx, rect))
+            setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+        else
+            setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+    }
+    else
+    {
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+}
+
+void TimelineComponent::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    if (e.x < trackLabelWidth) return;
+
+    float mx = static_cast<float>(e.x);
+    float my = static_cast<float>(e.y);
+    auto hit = hitTestClip(mx, my);
+
+    if (!hit.isValid())
+    {
+        // Double-click empty space → create new empty clip
+        int trackIdx = yToTrack(my);
+        double beatPos = xToBeat(mx);
+        beatPos = std::floor(beatPos); // snap to beat
+        if (beatPos < 0.0) beatPos = 0.0;
+
+        if (trackIdx >= 0 && trackIdx < PluginHost::NUM_TRACKS)
+            createEmptyClip(trackIdx, beatPos);
+    }
+    else
+    {
+        // Double-click clip → open piano roll
+        auto* clip = getClip(hit);
+        if (clip != nullptr)
+        {
+            new PianoRollWindow("Piano Roll - Track " + juce::String(hit.trackIndex + 1),
+                *clip, pluginHost.getEngine());
+        }
+    }
+}
 
 void TimelineComponent::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
     if (e.mods.isCtrlDown())
     {
-        // Zoom
         double zoomFactor = 1.0 + w.deltaY * 0.3;
         pixelsPerBeat = juce::jlimit(10.0, 200.0, pixelsPerBeat * zoomFactor);
     }
     else
     {
-        // Scroll horizontal
         scrollX -= w.deltaY * 4.0;
         if (scrollX < 0.0) scrollX = 0.0;
     }
     repaint();
 }
 
-void TimelineComponent::mouseDown(const juce::MouseEvent& e)
+bool TimelineComponent::keyPressed(const juce::KeyPress& key)
 {
-    if (e.x < trackLabelWidth) return;
-
-    int trackIdx = yToTrack(static_cast<float>(e.y));
-    if (trackIdx < 0 || trackIdx >= PluginHost::NUM_TRACKS) return;
-
-    // Right-click a clip to open piano roll
-    if (e.mods.isRightButtonDown())
+    if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
-        double beatPos = xToBeat(static_cast<float>(e.x));
-        auto* cp = pluginHost.getTrack(trackIdx).clipPlayer;
-        if (cp == nullptr) return;
+        deleteSelectedClip();
+        return true;
+    }
 
-        // Find which clip slot is at this position
-        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+    if (key.getModifiers().isCtrlDown() && key.getKeyCode() == 'D')
+    {
+        duplicateSelectedClip();
+        return true;
+    }
+
+    if (key.getModifiers().isCtrlDown() && key.getKeyCode() == 'B')
+    {
+        // Split at playhead
+        if (selectedClip.isValid())
         {
-            auto& slot = cp->getSlot(s);
-            if (slot.clip != nullptr && slot.hasContent())
+            double playheadBeat = pluginHost.getEngine().getPositionInBeats();
+            auto* clip = getClip(selectedClip);
+            if (clip != nullptr)
             {
-                // For now, clips in the timeline are placed at slot_index * clip_length
-                double clipStart = s * slot.clip->lengthInBeats;
-                double clipEnd = clipStart + slot.clip->lengthInBeats;
-
-                if (beatPos >= clipStart && beatPos < clipEnd)
-                {
-                    new PianoRollWindow("Piano Roll - Track " + juce::String(trackIdx + 1)
-                        + " Slot " + juce::String(s + 1), *slot.clip,
-                        pluginHost.getEngine());
-                    return;
-                }
+                double clipStart = clip->timelinePosition;
+                double clipEnd = clipStart + clip->lengthInBeats;
+                if (playheadBeat > clipStart && playheadBeat < clipEnd)
+                    splitClipAtBeat(selectedClip, playheadBeat);
             }
         }
+        return true;
     }
+
+    return false;
+}
+
+// ── Editing operations ───────────────────────────────────────────────────────
+
+void TimelineComponent::deleteSelectedClip()
+{
+    if (!selectedClip.isValid()) return;
+
+    auto* slot = getSlot(selectedClip);
+    if (slot == nullptr) return;
+
+    slot->clip = nullptr;
+    slot->state.store(ClipSlot::Empty);
+    selectedClip = {};
+    repaint();
+}
+
+void TimelineComponent::duplicateSelectedClip()
+{
+    if (!selectedClip.isValid()) return;
+
+    auto* srcClip = getClip(selectedClip);
+    if (srcClip == nullptr) return;
+
+    auto* cp = pluginHost.getTrack(selectedClip.trackIndex).clipPlayer;
+    if (cp == nullptr) return;
+
+    // Find empty slot on same track
+    int emptySlot = -1;
+    for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+    {
+        if (!cp->getSlot(s).hasContent() && cp->getSlot(s).clip == nullptr)
+        {
+            emptySlot = s;
+            break;
+        }
+    }
+
+    if (emptySlot < 0) return; // no empty slots
+
+    auto newClip = std::make_unique<MidiClip>();
+    newClip->lengthInBeats = srcClip->lengthInBeats;
+    newClip->timelinePosition = srcClip->timelinePosition + srcClip->lengthInBeats; // place after original
+
+    // Copy MIDI events
+    for (int i = 0; i < srcClip->events.getNumEvents(); ++i)
+    {
+        auto* event = srcClip->events.getEventPointer(i);
+        newClip->events.addEvent(event->message);
+    }
+    newClip->events.updateMatchedPairs();
+
+    cp->getSlot(emptySlot).clip = std::move(newClip);
+    cp->getSlot(emptySlot).state.store(ClipSlot::Stopped);
+
+    selectedClip = { selectedClip.trackIndex, emptySlot };
+    repaint();
+}
+
+void TimelineComponent::splitClipAtBeat(const ClipRef& ref, double beat)
+{
+    auto* srcClip = getClip(ref);
+    if (srcClip == nullptr) return;
+
+    double clipStart = srcClip->timelinePosition;
+    double splitPoint = beat - clipStart; // relative to clip start
+
+    if (splitPoint <= 0.0 || splitPoint >= srcClip->lengthInBeats) return;
+
+    auto* cp = pluginHost.getTrack(ref.trackIndex).clipPlayer;
+    if (cp == nullptr) return;
+
+    // Find empty slot for the second half
+    int emptySlot = -1;
+    for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+    {
+        if (!cp->getSlot(s).hasContent() && cp->getSlot(s).clip == nullptr)
+        {
+            emptySlot = s;
+            break;
+        }
+    }
+    if (emptySlot < 0) return;
+
+    // Create second half clip
+    auto newClip = std::make_unique<MidiClip>();
+    newClip->timelinePosition = beat;
+    newClip->lengthInBeats = srcClip->lengthInBeats - splitPoint;
+
+    // Split MIDI events
+    juce::MidiMessageSequence firstHalf, secondHalf;
+
+    for (int i = 0; i < srcClip->events.getNumEvents(); ++i)
+    {
+        auto* event = srcClip->events.getEventPointer(i);
+        double t = event->message.getTimeStamp();
+
+        if (t < splitPoint)
+        {
+            firstHalf.addEvent(event->message);
+        }
+        else
+        {
+            auto msg = event->message;
+            msg.setTimeStamp(t - splitPoint);
+            secondHalf.addEvent(msg);
+        }
+    }
+
+    firstHalf.updateMatchedPairs();
+    secondHalf.updateMatchedPairs();
+
+    // Update original clip (first half)
+    srcClip->events = firstHalf;
+    srcClip->lengthInBeats = splitPoint;
+
+    // Set up second half
+    newClip->events = secondHalf;
+    cp->getSlot(emptySlot).clip = std::move(newClip);
+    cp->getSlot(emptySlot).state.store(ClipSlot::Stopped);
+
+    repaint();
+}
+
+void TimelineComponent::createEmptyClip(int trackIndex, double beatPos)
+{
+    auto* cp = pluginHost.getTrack(trackIndex).clipPlayer;
+    if (cp == nullptr) return;
+
+    int emptySlot = -1;
+    for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+    {
+        if (!cp->getSlot(s).hasContent() && cp->getSlot(s).clip == nullptr)
+        {
+            emptySlot = s;
+            break;
+        }
+    }
+    if (emptySlot < 0) return;
+
+    auto newClip = std::make_unique<MidiClip>();
+    newClip->timelinePosition = beatPos;
+    newClip->lengthInBeats = 4.0; // 1 bar
+
+    cp->getSlot(emptySlot).clip = std::move(newClip);
+    cp->getSlot(emptySlot).state.store(ClipSlot::Stopped);
+
+    selectedClip = { trackIndex, emptySlot };
+    repaint();
 }
 
 // ── Drawing ──────────────────────────────────────────────────────────────────
@@ -119,11 +524,9 @@ void TimelineComponent::resized() {}
 
 void TimelineComponent::drawHeader(juce::Graphics& g)
 {
-    // Background
     g.setColour(juce::Colour(0xff2a2a2a));
     g.fillRect(0, 0, getWidth(), headerHeight);
 
-    // Beat/bar numbers
     double firstBeat = std::floor(scrollX);
     double lastBeat = scrollX + (getWidth() - trackLabelWidth) / pixelsPerBeat;
 
@@ -148,7 +551,6 @@ void TimelineComponent::drawHeader(juce::Graphics& g)
                            static_cast<float>(getHeight()));
     }
 
-    // Divider line
     g.setColour(juce::Colour(0xff444444));
     g.drawHorizontalLine(headerHeight - 1, 0, static_cast<float>(getWidth()));
 }
@@ -159,11 +561,9 @@ void TimelineComponent::drawTrackLanes(juce::Graphics& g)
     {
         int y = headerHeight + t * trackHeight;
 
-        // Alternating background
         g.setColour(t % 2 == 0 ? juce::Colour(0xff1e1e1e) : juce::Colour(0xff222222));
         g.fillRect(0, y, getWidth(), trackHeight);
 
-        // Track label
         g.setColour(juce::Colour(0xffaaaaaa));
         g.setFont(11.0f);
 
@@ -174,7 +574,6 @@ void TimelineComponent::drawTrackLanes(juce::Graphics& g)
 
         g.drawText(label, 4, y, trackLabelWidth - 8, trackHeight, juce::Justification::centredLeft);
 
-        // Lane divider
         g.setColour(juce::Colour(0xff333333));
         g.drawHorizontalLine(y + trackHeight - 1, 0, static_cast<float>(getWidth()));
     }
@@ -187,27 +586,16 @@ void TimelineComponent::drawClips(juce::Graphics& g)
         auto* cp = pluginHost.getTrack(t).clipPlayer;
         if (cp == nullptr) continue;
 
-        int laneY = headerHeight + t * trackHeight;
-
         for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
         {
             auto& slot = cp->getSlot(s);
-            if (slot.clip == nullptr || !slot.hasContent()) continue;
+            if (slot.clip == nullptr) continue;
 
-            // Place clips sequentially: slot 0 at beat 0, slot 1 at end of slot 0, etc.
-            double clipStart = s * slot.clip->lengthInBeats;
-            double clipEnd = clipStart + slot.clip->lengthInBeats;
+            auto clipRect = getClipRect(t, s);
+            if (clipRect.isEmpty()) continue;
+            if (clipRect.getRight() < trackLabelWidth || clipRect.getX() > getWidth()) continue;
 
-            float x1 = beatToX(clipStart);
-            float x2 = beatToX(clipEnd);
-
-            // Skip if out of view
-            if (x2 < trackLabelWidth || x1 > getWidth()) continue;
-
-            // Clip block
-            auto clipRect = juce::Rectangle<float>(x1, static_cast<float>(laneY + 2),
-                                                    x2 - x1, static_cast<float>(trackHeight - 4));
-
+            // Color based on state
             auto state = slot.state.load();
             juce::Colour clipColor;
             if (state == ClipSlot::Playing)
@@ -217,24 +605,33 @@ void TimelineComponent::drawClips(juce::Graphics& g)
             else
                 clipColor = juce::Colour(0xff445566);
 
+            // Selected highlight
+            bool isSelected = selectedClip.trackIndex == t && selectedClip.slotIndex == s;
+            if (isSelected)
+                clipColor = clipColor.brighter(0.3f);
+
             g.setColour(clipColor);
             g.fillRoundedRectangle(clipRect, 3.0f);
 
-            // Border
-            g.setColour(clipColor.brighter(0.3f));
-            g.drawRoundedRectangle(clipRect, 3.0f, 1.0f);
+            g.setColour(isSelected ? juce::Colours::white : clipColor.brighter(0.3f));
+            g.drawRoundedRectangle(clipRect, 3.0f, isSelected ? 2.0f : 1.0f);
 
-            // Mini note preview inside the clip
-            g.saveState();
-            g.reduceClipRegion(clipRect.toNearestInt());
-            drawMiniNotes(g, *slot.clip, clipRect);
-            g.restoreState();
+            // Resize handles
+            if (isSelected)
+            {
+                g.setColour(juce::Colours::white.withAlpha(0.4f));
+                g.fillRect(clipRect.getX(), clipRect.getY() + 4, 3.0f, clipRect.getHeight() - 8);
+                g.fillRect(clipRect.getRight() - 3, clipRect.getY() + 4, 3.0f, clipRect.getHeight() - 8);
+            }
 
-            // Slot label
-            g.setColour(juce::Colours::white.withAlpha(0.7f));
-            g.setFont(9.0f);
-            g.drawText("S" + juce::String(s + 1), clipRect.reduced(4, 0),
-                       juce::Justification::topLeft);
+            // Mini note preview
+            if (slot.hasContent())
+            {
+                g.saveState();
+                g.reduceClipRegion(clipRect.toNearestInt());
+                drawMiniNotes(g, *slot.clip, clipRect);
+                g.restoreState();
+            }
         }
     }
 }
@@ -243,7 +640,6 @@ void TimelineComponent::drawMiniNotes(juce::Graphics& g, const MidiClip& clip, j
 {
     if (clip.events.getNumEvents() == 0 || clip.lengthInBeats <= 0.0) return;
 
-    // Find note range for scaling
     int minNote = 127, maxNote = 0;
     for (int i = 0; i < clip.events.getNumEvents(); ++i)
     {
@@ -258,7 +654,7 @@ void TimelineComponent::drawMiniNotes(juce::Graphics& g, const MidiClip& clip, j
     if (minNote > maxNote) return;
     int noteRange = juce::jmax(1, maxNote - minNote + 1);
 
-    float noteH = juce::jmax(1.0f, (area.getHeight() - 12.0f) / static_cast<float>(noteRange));
+    float noteH = juce::jmax(1.0f, (area.getHeight() - 6.0f) / static_cast<float>(noteRange));
     float beatsToPixels = area.getWidth() / static_cast<float>(clip.lengthInBeats);
 
     g.setColour(juce::Colours::white.withAlpha(0.5f));
@@ -269,7 +665,6 @@ void TimelineComponent::drawMiniNotes(juce::Graphics& g, const MidiClip& clip, j
         if (!event->message.isNoteOn()) continue;
 
         float nx = area.getX() + static_cast<float>(event->message.getTimeStamp()) * beatsToPixels;
-
         float noteLen = 0.25f;
         if (event->noteOffObject != nullptr)
         {
@@ -280,7 +675,7 @@ void TimelineComponent::drawMiniNotes(juce::Graphics& g, const MidiClip& clip, j
         float nw = noteLen * beatsToPixels;
 
         int noteRow = maxNote - event->message.getNoteNumber();
-        float ny = area.getY() + 10.0f + noteRow * noteH;
+        float ny = area.getY() + 3.0f + noteRow * noteH;
 
         g.fillRect(nx, ny, juce::jmax(1.0f, nw), juce::jmax(1.0f, noteH - 1.0f));
     }
@@ -296,17 +691,14 @@ void TimelineComponent::drawPlayhead(juce::Graphics& g)
 
     if (x < trackLabelWidth || x > getWidth()) return;
 
-    // Playhead line
     g.setColour(juce::Colour(0xddffcc00));
     g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight),
                        static_cast<float>(getHeight()));
 
-    // Glow
     g.setColour(juce::Colour(0x33ffcc00));
     g.fillRect(x - 1.0f, static_cast<float>(headerHeight), 3.0f,
                static_cast<float>(getHeight() - headerHeight));
 
-    // Playhead triangle at top
     g.setColour(juce::Colour(0xffee9900));
     juce::Path triangle;
     triangle.addTriangle(x - 5, static_cast<float>(headerHeight),

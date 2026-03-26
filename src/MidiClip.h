@@ -6,8 +6,9 @@
 
 struct MidiClip
 {
-    juce::MidiMessageSequence events;  // timestamps in beats
+    juce::MidiMessageSequence events;  // timestamps in beats (relative to clip start)
     double lengthInBeats = 4.0;        // default 1 bar at 4/4
+    double timelinePosition = 0.0;     // where this clip sits on the arrangement timeline (in beats)
 };
 
 struct ClipSlot

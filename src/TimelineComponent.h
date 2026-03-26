@@ -15,16 +15,46 @@ public:
     void timerCallback() override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override;
     void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseUp(const juce::MouseEvent& e) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseDoubleClick(const juce::MouseEvent& e) override;
+    bool keyPressed(const juce::KeyPress& key) override;
 
 private:
     PluginHost& pluginHost;
 
     // View state
-    double scrollX = 0.0;       // beats offset
+    double scrollX = 0.0;
     double pixelsPerBeat = 40.0;
     int trackHeight = 40;
-    int headerHeight = 20;      // beat numbers at top
+    int headerHeight = 20;
     int trackLabelWidth = 60;
+
+    // Selection / interaction
+    struct ClipRef {
+        int trackIndex = -1;
+        int slotIndex = -1;
+        bool isValid() const { return trackIndex >= 0 && slotIndex >= 0; }
+    };
+
+    enum DragMode { NoDrag, MoveClip, ResizeClipLeft, ResizeClipRight };
+    DragMode dragMode = NoDrag;
+
+    ClipRef selectedClip;
+    ClipRef dragClip;
+    double dragStartBeat = 0.0;
+    int dragStartTrack = 0;
+    double clipOrigPosition = 0.0;
+    double clipOrigLength = 0.0;
+
+    // Hit testing
+    ClipRef hitTestClip(float x, float y) const;
+    juce::Rectangle<float> getClipRect(int trackIndex, int slotIndex) const;
+    bool isOnClipLeftEdge(float x, const juce::Rectangle<float>& rect) const;
+    bool isOnClipRightEdge(float x, const juce::Rectangle<float>& rect) const;
+    ClipSlot* getSlot(const ClipRef& ref) const;
+    MidiClip* getClip(const ClipRef& ref) const;
 
     // Drawing
     void drawHeader(juce::Graphics& g);
@@ -37,6 +67,12 @@ private:
     float beatToX(double beat) const;
     double xToBeat(float x) const;
     int yToTrack(float y) const;
+
+    // Editing operations
+    void deleteSelectedClip();
+    void duplicateSelectedClip();
+    void splitClipAtBeat(const ClipRef& ref, double beat);
+    void createEmptyClip(int trackIndex, double beatPos);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TimelineComponent)
 };
