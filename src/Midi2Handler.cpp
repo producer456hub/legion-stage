@@ -179,21 +179,67 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
                 headerStr += juce::String::charToString(static_cast<char>(data[16 + i]));
 
             // Parse the resource name from the header
+            // Try JSON parse first, fall back to manual extraction
+            juce::String resource;
             auto headerJson = juce::JSON::parse(headerStr);
-            juce::String resource = headerJson.getProperty("resource", "").toString();
+            if (headerJson.isObject())
+            {
+                resource = headerJson.getProperty("resource", "").toString();
+            }
+
+            // Fallback: manually extract resource from header string
+            if (resource.isEmpty())
+            {
+                int resStart = headerStr.indexOf("resource");
+                if (resStart >= 0)
+                {
+                    // Find the value after "resource" + separator + quote
+                    int valStart = headerStr.indexOf(resStart, "\"");
+                    if (valStart >= 0)
+                    {
+                        valStart++; // skip opening quote
+                        // Skip to the value (there might be another quote after colon/semicolon)
+                        int nextQuote = headerStr.indexOf(valStart, "\"");
+                        if (nextQuote >= 0)
+                        {
+                            // Check if this is the key or value
+                            juce::String candidate = headerStr.substring(valStart, nextQuote);
+                            if (candidate == "resource")
+                            {
+                                // Skip past separator, find next quoted value
+                                int valQuote = headerStr.indexOf(nextQuote + 1, "\"");
+                                if (valQuote >= 0)
+                                {
+                                    int endQuote = headerStr.indexOf(valQuote + 1, "\"");
+                                    if (endQuote >= 0)
+                                        resource = headerStr.substring(valQuote + 1, endQuote);
+                                }
+                            }
+                            else
+                            {
+                                resource = candidate;
+                            }
+                        }
+                    }
+                }
+            }
 
             // Build response
             juce::String responseBody;
             juce::String responseHeader = "{\"status\":200,\"mediaType\":\"application/json\"}";
 
-            if (resource == "ResourceList")
+            auto resourceLower = resource.toLowerCase();
+
+            if (resourceLower == "resourcelist")
                 responseBody = buildResourceList();
-            else if (resource == "DeviceInfo")
+            else if (resourceLower == "deviceinfo")
                 responseBody = buildDeviceInfo();
-            else if (resource == "X-ParameterList")
+            else if (resourceLower == "x-parameterlist")
                 responseBody = buildParameterList();
-            else if (resource == "X-ProgramEdit")
+            else if (resourceLower == "x-programedit")
                 responseBody = buildProgramEdit();
+            else if (resourceLower == "channellist")
+                responseBody = "[{\"title\":\"DAW3\",\"channel\":1}]";
             else
                 responseHeader = "{\"status\":404}";
 
