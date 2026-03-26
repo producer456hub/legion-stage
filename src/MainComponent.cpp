@@ -704,78 +704,101 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
             }
         }
 
-        // Handle Keystage transport buttons (Ch.15 native mode)
+        // Handle Keystage transport/nav buttons
+        // Log ALL CCs for debugging
+        if (msg.isController())
+        {
+            int tcc = msg.getControllerNumber();
+            int tval = msg.getControllerValue();
+            int tch = msg.getChannel();
+
+            juce::MessageManager::callAsync([this, tcc, tval, tch] {
+                statusLabel.setText("CC" + juce::String(tcc) + "=" + juce::String(tval) + " ch" + juce::String(tch),
+                    juce::dontSendNotification);
+            });
+        }
+
+        // Transport buttons — trigger on value 127 (button press, not release)
         if (msg.isController() && msg.getControllerValue() == 127)
         {
             int tcc = msg.getControllerNumber();
-            if (tcc == 0x29)      // PLAY
+            if (tcc == 0x29 || tcc == 41)      // PLAY
+            {
                 pluginHost.getEngine().play();
-            else if (tcc == 0x2A) // STOP
+                juce::MessageManager::callAsync([this] { playButton.setToggleState(true, juce::dontSendNotification); });
+            }
+            else if (tcc == 0x2A || tcc == 42) // STOP
             {
                 auto& eng = pluginHost.getEngine();
-                if (!eng.isPlaying()) { eng.resetPosition(); }
-                else { eng.stop(); for (int t = 0; t < PluginHost::NUM_TRACKS; ++t) { auto* cp = pluginHost.getTrack(t).clipPlayer; if (cp) cp->sendAllNotesOff.store(true); } }
+                if (!eng.isPlaying())
+                {
+                    eng.resetPosition();
+                    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+                    {
+                        auto* cp = pluginHost.getTrack(t).clipPlayer;
+                        if (cp) cp->stopAllSlots();
+                    }
+                }
+                else
+                {
+                    eng.stop();
+                    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+                    {
+                        auto* cp = pluginHost.getTrack(t).clipPlayer;
+                        if (cp) cp->sendAllNotesOff.store(true);
+                    }
+                }
+                juce::MessageManager::callAsync([this] {
+                    if (timelineComponent) timelineComponent->repaint();
+                });
             }
-            else if (tcc == 0x2D) // REC
+            else if (tcc == 0x2D || tcc == 45) // REC
+            {
                 pluginHost.getEngine().toggleRecord();
-            else if (tcc == 0x2F) // TEMPO — toggle metronome
+                juce::MessageManager::callAsync([this] {
+                    recordButton.setToggleState(pluginHost.getEngine().isRecording(), juce::dontSendNotification);
+                });
+            }
+            else if (tcc == 0x2F || tcc == 47) // TEMPO — toggle metronome
+            {
                 pluginHost.getEngine().toggleMetronome();
-            else if (tcc == 0x3A) // NEXT TRACK
+                juce::MessageManager::callAsync([this] {
+                    metronomeButton.setToggleState(pluginHost.getEngine().isMetronomeOn(), juce::dontSendNotification);
+                });
+            }
+            else if (tcc == 58 || tcc == 0x3A) // NEXT TRACK
                 selectTrack(juce::jmin(PluginHost::NUM_TRACKS - 1, selectedTrackIndex + 1));
-            else if (tcc == 0x3B) // PREV TRACK
+            else if (tcc == 59 || tcc == 0x3B) // PREV TRACK
                 selectTrack(juce::jmax(0, selectedTrackIndex - 1));
-            else if (tcc == 0x3C) // VALUE DOWN → prev preset
+            else if (tcc == 60 || tcc == 0x3C) // VALUE DOWN → prev preset
             {
                 midi2Handler.prevPreset();
                 juce::MessageManager::callAsync([this] {
-                    trackNameLabel.setText("Preset: " + pluginHost.getTrack(selectedTrackIndex).plugin->getProgramName(
-                        pluginHost.getTrack(selectedTrackIndex).plugin->getCurrentProgram()), juce::dontSendNotification);
+                    auto& trk = pluginHost.getTrack(selectedTrackIndex);
+                    if (trk.plugin) trackNameLabel.setText("Preset: " + trk.plugin->getProgramName(trk.plugin->getCurrentProgram()), juce::dontSendNotification);
                 });
             }
-            else if (tcc == 0x3D) // VALUE UP → next preset
+            else if (tcc == 61 || tcc == 0x3D) // VALUE UP → next preset
             {
                 midi2Handler.nextPreset();
                 juce::MessageManager::callAsync([this] {
-                    trackNameLabel.setText("Preset: " + pluginHost.getTrack(selectedTrackIndex).plugin->getProgramName(
-                        pluginHost.getTrack(selectedTrackIndex).plugin->getCurrentProgram()), juce::dontSendNotification);
+                    auto& trk = pluginHost.getTrack(selectedTrackIndex);
+                    if (trk.plugin) trackNameLabel.setText("Preset: " + trk.plugin->getProgramName(trk.plugin->getCurrentProgram()), juce::dontSendNotification);
                 });
             }
-        }
-
-        // Page buttons (these might come as note messages or different CCs)
-        // Also check for value knob left/right as page navigation
-        if (msg.isController() && msg.getControllerValue() == 127)
-        {
-            int tcc = msg.getControllerNumber();
-            if (tcc == 0x3E) // VALUE KNOB LEFT → prev page
+            else if (tcc == 62 || tcc == 0x3E) // VALUE KNOB LEFT → prev page
             {
                 midi2Handler.prevPage();
                 auto& ciOut = midi2Handler.getOutgoing();
-                if (!ciOut.isEmpty() && midiOutput)
-                {
-                    for (const auto metadata : ciOut)
-                        midiOutput->sendMessageNow(metadata.getMessage());
-                    midi2Handler.clearOutgoing();
-                }
-                juce::MessageManager::callAsync([this] {
-                    trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1),
-                        juce::dontSendNotification);
-                });
+                if (!ciOut.isEmpty() && midiOutput) { for (const auto metadata : ciOut) midiOutput->sendMessageNow(metadata.getMessage()); midi2Handler.clearOutgoing(); }
+                juce::MessageManager::callAsync([this] { trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1), juce::dontSendNotification); });
             }
-            else if (tcc == 0x3F) // VALUE KNOB RIGHT → next page
+            else if (tcc == 63 || tcc == 0x3F) // VALUE KNOB RIGHT → next page
             {
                 midi2Handler.nextPage();
                 auto& ciOut = midi2Handler.getOutgoing();
-                if (!ciOut.isEmpty() && midiOutput)
-                {
-                    for (const auto metadata : ciOut)
-                        midiOutput->sendMessageNow(metadata.getMessage());
-                    midi2Handler.clearOutgoing();
-                }
-                juce::MessageManager::callAsync([this] {
-                    trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1),
-                        juce::dontSendNotification);
-                });
+                if (!ciOut.isEmpty() && midiOutput) { for (const auto metadata : ciOut) midiOutput->sendMessageNow(metadata.getMessage()); midi2Handler.clearOutgoing(); }
+                juce::MessageManager::callAsync([this] { trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1), juce::dontSendNotification); });
             }
         }
 
