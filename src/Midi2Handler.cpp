@@ -54,7 +54,6 @@ void Midi2Handler::handleCC(int ccNumber, int value)
 {
     if (currentPlugin == nullptr) return;
 
-    // First try exact CC match from mappings
     for (auto& m : mappings)
     {
         if (m.cc == ccNumber && m.pluginParamIndex >= 0)
@@ -69,38 +68,6 @@ void Midi2Handler::handleCC(int ccNumber, int value)
                     sendParameterUpdate();
             }
             return;
-        }
-    }
-
-    // If no exact match, learn the CC — map sequential CCs to sequential params
-    // This handles when the Keystage sends CCs that aren't 24-31
-    if (!mappings.isEmpty())
-    {
-        // Find which knob index this CC corresponds to (by tracking order of CCs seen)
-        static juce::Array<int> learnedCCs;
-        int knobIndex = learnedCCs.indexOf(ccNumber);
-        if (knobIndex < 0 && learnedCCs.size() < 8)
-        {
-            learnedCCs.add(ccNumber);
-            knobIndex = learnedCCs.size() - 1;
-
-            // Update the mapping to use this CC
-            if (knobIndex < mappings.size())
-                mappings.getReference(knobIndex).cc = ccNumber;
-        }
-
-        if (knobIndex >= 0 && knobIndex < mappings.size())
-        {
-            auto& m = mappings.getReference(knobIndex);
-            auto& params = currentPlugin->getParameters();
-            if (m.pluginParamIndex >= 0 && m.pluginParamIndex < params.size())
-            {
-                float normalized = static_cast<float>(value) / 127.0f;
-                params[m.pluginParamIndex]->setValue(normalized);
-
-                if (hasXProgramEditSubscription && isConnected())
-                    sendParameterUpdate();
-            }
         }
     }
 }
