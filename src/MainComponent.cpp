@@ -578,6 +578,17 @@ void MainComponent::sendNoteOff(int note)
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
+    // Spacebar = play/stop toggle
+    if (key == juce::KeyPress::spaceKey)
+    {
+        auto& eng = pluginHost.getEngine();
+        if (eng.isPlaying())
+            eng.stop();
+        else
+            eng.play();
+        return true;
+    }
+
     if (!useComputerKeyboard) return false;
 
     int keyCode = key.getTextCharacter();
