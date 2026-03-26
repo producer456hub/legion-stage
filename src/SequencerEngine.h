@@ -20,6 +20,7 @@ public:
     double getBpm() const { return bpm.load(); }
     double getPositionInBeats() const { return positionInBeats.load(); }
     bool isInCountIn() const { return countingIn.load(); }
+    double getCountInBeatsRemaining() const { return countInBeatsRemaining; }
 
     // Called from audio thread each block
     double advancePosition(int numSamples, double sampleRate);

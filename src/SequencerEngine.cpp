@@ -52,23 +52,19 @@ double SequencerEngine::advancePosition(int numSamples, double sampleRate)
     {
         countInBeatsRemaining -= beatsThisBlock;
 
-        // Metronome clicks during count-in
-        if (metronomeEnabled.load())
+        // ALWAYS play metronome clicks during count-in (regardless of metronome toggle)
+        double countInPos = 16.0 - countInBeatsRemaining;
+        double prevPos = countInPos - beatsThisBlock;
+
+        int oldBeat = static_cast<int>(std::floor(prevPos));
+        int newBeat = static_cast<int>(std::floor(countInPos));
+
+        if (newBeat > oldBeat)
         {
-            // Calculate beat crossings during count-in
-            double countInPos = 16.0 - countInBeatsRemaining;
-            double prevPos = countInPos - beatsThisBlock;
-
-            int oldBeat = static_cast<int>(std::floor(prevPos));
-            int newBeat = static_cast<int>(std::floor(countInPos));
-
-            if (newBeat > oldBeat)
-            {
-                bool isDownbeat = (newBeat % 4) == 0;
-                clickFrequency = isDownbeat ? 1500.0 : 1000.0;
-                clickSamplesRemaining = static_cast<int>(sampleRate * 0.02);
-                clickPhase = 0.0;
-            }
+            bool isDownbeat = (newBeat % 4) == 0;
+            clickFrequency = isDownbeat ? 1500.0 : 1000.0;
+            clickSamplesRemaining = static_cast<int>(sampleRate * 0.03); // slightly longer click for count-in
+            clickPhase = 0.0;
         }
 
         if (countInBeatsRemaining <= 0.0)

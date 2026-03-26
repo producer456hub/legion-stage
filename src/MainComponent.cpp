@@ -236,8 +236,18 @@ MainComponent::~MainComponent()
 
 void MainComponent::timerCallback()
 {
-    double beat = pluginHost.getEngine().getPositionInBeats();
-    beatLabel.setText("Beat: " + juce::String(beat, 1), juce::dontSendNotification);
+    auto& eng = pluginHost.getEngine();
+
+    if (eng.isInCountIn())
+    {
+        int barsLeft = static_cast<int>(std::ceil(eng.getCountInBeatsRemaining() / 4.0));
+        beatLabel.setText("Count: -" + juce::String(barsLeft), juce::dontSendNotification);
+    }
+    else
+    {
+        double beat = eng.getPositionInBeats();
+        beatLabel.setText("Beat: " + juce::String(beat, 1), juce::dontSendNotification);
+    }
 
     // Sync if timeline changed the selected track or arm state
     int currentSelected = pluginHost.getSelectedTrack();
