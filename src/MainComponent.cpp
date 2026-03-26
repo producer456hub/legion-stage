@@ -759,6 +759,18 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
                     recordButton.setToggleState(pluginHost.getEngine().isRecording(), juce::dontSendNotification);
                 });
             }
+            else if (tcc == 0x2B || tcc == 43) // REW → scroll timeline left
+            {
+                if (timelineComponent) timelineComponent->scrollLeft();
+            }
+            else if (tcc == 0x2C || tcc == 44) // FF → scroll timeline right
+            {
+                if (timelineComponent) timelineComponent->scrollRight();
+            }
+            else if (tcc == 0x2E || tcc == 46) // LOOP → (reserved for future)
+            {
+                // Could toggle loop mode
+            }
             else if (tcc == 0x2F || tcc == 47) // TEMPO — toggle metronome
             {
                 pluginHost.getEngine().toggleMetronome();
@@ -770,6 +782,17 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
                 selectTrack(juce::jmin(PluginHost::NUM_TRACKS - 1, selectedTrackIndex + 1));
             else if (tcc == 59 || tcc == 0x3B) // PREV TRACK
                 selectTrack(juce::jmax(0, selectedTrackIndex - 1));
+            else if (tcc == 32) // CC32 — Page/Value button → cycle parameter page
+            {
+                midi2Handler.nextPage();
+                auto& ciOut = midi2Handler.getOutgoing();
+                if (!ciOut.isEmpty() && midiOutput) { for (const auto metadata : ciOut) midiOutput->sendMessageNow(metadata.getMessage()); midi2Handler.clearOutgoing(); }
+                juce::MessageManager::callAsync([this] {
+                    trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1)
+                        + "/" + juce::String(midi2Handler.getNumPages()), juce::dontSendNotification);
+                    updateParamSliders();
+                });
+            }
             else if (tcc == 60 || tcc == 0x3C) // VALUE DOWN → prev preset
             {
                 midi2Handler.prevPreset();

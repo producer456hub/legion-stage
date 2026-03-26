@@ -58,13 +58,13 @@ private:
     static constexpr int UPDATE_INTERVAL_MS = 30; // max ~33 updates/sec
     int lastChangedParamIndex = -1;
     int currentPage = 0;
-    int getNumPages() const;
 
 public:
     // Page navigation — changes which 8 params are mapped to knobs
     void nextPage();
     void prevPage();
     int getCurrentPage() const { return currentPage; }
+    int getNumPages() const;
 
     // Preset navigation
     void nextPreset();

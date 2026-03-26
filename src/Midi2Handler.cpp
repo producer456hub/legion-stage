@@ -102,16 +102,14 @@ int Midi2Handler::getNumPages() const
 void Midi2Handler::nextPage()
 {
     if (currentPlugin == nullptr) return;
-    int maxPage = getNumPages() - 1;
-    if (currentPage < maxPage)
+    currentPage++;
+    if (currentPage >= getNumPages())
+        currentPage = 0; // wrap around
+    buildMappings();
+    if (isConnected())
     {
-        currentPage++;
-        buildMappings();
-        if (isConnected())
-        {
-            pushParameterListToKeystage();
-            pushProgramEditToKeystage();
-        }
+        pushParameterListToKeystage();
+        pushProgramEditToKeystage();
     }
 }
 
