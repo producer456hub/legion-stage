@@ -22,6 +22,9 @@ public:
     juce::MidiBuffer& getOutgoingMessages() { return outgoingMidi; }
     void clearOutgoing() { outgoingMidi.clear(); }
 
+    // Initiate discovery — sends CI discovery message
+    void sendDiscovery();
+
     // Status
     bool isConnected() const;
     juce::String getStatusText() const;

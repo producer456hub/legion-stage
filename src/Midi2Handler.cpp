@@ -62,6 +62,14 @@ void Midi2Handler::setPlugin(juce::AudioProcessor* plugin)
     currentPlugin = plugin;
 }
 
+void Midi2Handler::sendDiscovery()
+{
+    if (!ciDevice) return;
+
+    // Send CI Discovery to broadcast MUID on group 0
+    ciDevice->sendDiscovery();
+}
+
 void Midi2Handler::processMessage(const juce::MidiMessage& msg)
 {
     if (!ciDevice || !msg.isSysEx()) return;

@@ -198,7 +198,24 @@ MainComponent::MainComponent()
         {
             auto& track = pluginHost.getTrack(selectedTrackIndex);
             midi2Handler.setPlugin(track.plugin);
-            statusLabel.setText("MIDI 2.0 CI enabled — waiting for controller...", juce::dontSendNotification);
+
+            // Send CI Discovery to find controllers
+            midi2Handler.sendDiscovery();
+
+            // Send the discovery message out through MIDI
+            auto& outgoing = midi2Handler.getOutgoingMessages();
+            if (!outgoing.isEmpty() && currentMidiDeviceId.isNotEmpty())
+            {
+                auto midiOut = juce::MidiOutput::openDevice(currentMidiDeviceId);
+                if (midiOut)
+                {
+                    for (const auto metadata : outgoing)
+                        midiOut->sendMessageNow(metadata.getMessage());
+                }
+                midi2Handler.clearOutgoing();
+            }
+
+            statusLabel.setText("MIDI 2.0 CI: Discovery sent", juce::dontSendNotification);
         }
         else
         {
@@ -579,22 +596,35 @@ void MainComponent::selectMidiDevice()
 
 void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const juce::MidiMessage& msg)
 {
-    // Intercept SysEx for MIDI 2.0 CI
-    if (midi2Enabled && msg.isSysEx())
+    // Log all incoming messages for debugging
+    if (midi2Enabled)
     {
-        midi2Handler.processMessage(msg);
-
-        // Send any CI responses back through the MIDI output
-        auto& outgoing = midi2Handler.getOutgoingMessages();
-        if (!outgoing.isEmpty())
+        if (msg.isSysEx())
         {
-            // TODO: send outgoing CI messages back to the device
-            // For now, just clear them
-            midi2Handler.clearOutgoing();
+            // CI SysEx received — route to handler
+            midi2Handler.processMessage(msg);
+
+            // Send CI responses back to the controller
+            auto& outgoing = midi2Handler.getOutgoingMessages();
+            if (!outgoing.isEmpty())
+            {
+                // Send each response message back through the MIDI output
+                auto midiOut = juce::MidiOutput::openDevice(currentMidiDeviceId);
+                if (midiOut)
+                {
+                    for (const auto metadata : outgoing)
+                        midiOut->sendMessageNow(metadata.getMessage());
+                }
+                midi2Handler.clearOutgoing();
+            }
+
+            juce::MessageManager::callAsync([this] {
+                statusLabel.setText("CI: SysEx received", juce::dontSendNotification);
+            });
         }
     }
 
-    // Forward all MIDI (including notes) to the collector for audio processing
+    // Forward all MIDI to the collector for audio processing
     pluginHost.getMidiCollector().addMessageToQueue(msg);
 }
 
