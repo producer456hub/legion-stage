@@ -202,6 +202,8 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
                 responseBody = buildProgramEdit();
             else if (hdrLower.contains("channellist"))
                 responseBody = "[{\"title\":\"DAW3\",\"channel\":1}]";
+            else if (hdrLower.contains("programlist"))
+                responseBody = "[]";
             else
             {
                 // Unknown resource — respond with parameter list anyway for debugging
@@ -428,6 +430,8 @@ void Midi2Handler::sendParameterUpdate()
 juce::String Midi2Handler::buildResourceList() const
 {
     return "[{\"resource\":\"DeviceInfo\"},"
+           "{\"resource\":\"ChannelList\"},"
+           "{\"resource\":\"ProgramList\"},"
            "{\"resource\":\"X-ParameterList\"},"
            "{\"resource\":\"X-ProgramEdit\",\"canSubscribe\":true}]";
 }
