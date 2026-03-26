@@ -181,6 +181,10 @@ MainComponent::MainComponent()
     addAndMakeVisible(midiInputSelector);
     midiInputSelector.onChange = [this] { selectMidiDevice(); };
 
+    addAndMakeVisible(midiRefreshButton);
+    midiRefreshButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
+    midiRefreshButton.onClick = [this] { scanMidiDevices(); };
+
     addAndMakeVisible(audioSettingsButton);
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
 
@@ -567,16 +571,38 @@ void MainComponent::selectMidiDevice()
     if (idx < 0 || idx >= midiDevices.size()) { updateStatusLabel(); return; }
     auto& d = midiDevices[idx];
     deviceManager.setMidiInputDeviceEnabled(d.identifier, true);
-    deviceManager.addMidiInputDeviceCallback(d.identifier, &pluginHost.getMidiCollector());
+    // Route through our callback so we can intercept CI SysEx
+    deviceManager.addMidiInputDeviceCallback(d.identifier, this);
     currentMidiDeviceId = d.identifier;
     updateStatusLabel();
+}
+
+void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const juce::MidiMessage& msg)
+{
+    // Intercept SysEx for MIDI 2.0 CI
+    if (midi2Enabled && msg.isSysEx())
+    {
+        midi2Handler.processMessage(msg);
+
+        // Send any CI responses back through the MIDI output
+        auto& outgoing = midi2Handler.getOutgoingMessages();
+        if (!outgoing.isEmpty())
+        {
+            // TODO: send outgoing CI messages back to the device
+            // For now, just clear them
+            midi2Handler.clearOutgoing();
+        }
+    }
+
+    // Forward all MIDI (including notes) to the collector for audio processing
+    pluginHost.getMidiCollector().addMessageToQueue(msg);
 }
 
 void MainComponent::disableCurrentMidiDevice()
 {
     if (currentMidiDeviceId.isNotEmpty())
     {
-        deviceManager.removeMidiInputDeviceCallback(currentMidiDeviceId, &pluginHost.getMidiCollector());
+        deviceManager.removeMidiInputDeviceCallback(currentMidiDeviceId, this);
         deviceManager.setMidiInputDeviceEnabled(currentMidiDeviceId, false);
         currentMidiDeviceId.clear();
     }
@@ -1014,7 +1040,10 @@ void MainComponent::resized()
     rightPanel.removeFromTop(4);
     testNoteButton.setBounds(rightPanel.removeFromTop(32));
     rightPanel.removeFromTop(8);
-    midiInputSelector.setBounds(rightPanel.removeFromTop(30));
+    auto midiRow = rightPanel.removeFromTop(30);
+    midiRefreshButton.setBounds(midiRow.removeFromRight(60));
+    midiRow.removeFromRight(4);
+    midiInputSelector.setBounds(midiRow);
     rightPanel.removeFromTop(4);
     audioSettingsButton.setBounds(rightPanel.removeFromTop(32));
     rightPanel.removeFromTop(4);

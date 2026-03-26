@@ -26,7 +26,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginEditorWindow)
 };
 
-class MainComponent : public juce::Component, public juce::Timer
+class MainComponent : public juce::Component, public juce::Timer, public juce::MidiInputCallback
 {
 public:
     MainComponent();
@@ -81,8 +81,12 @@ private:
     juce::ComboBox pluginSelector;
     juce::TextButton openEditorButton { "Open Editor" };
     juce::ComboBox midiInputSelector;
+    juce::TextButton midiRefreshButton { "Refresh" };
     juce::TextButton audioSettingsButton { "Audio Settings" };
     juce::TextButton testNoteButton { "Test Note" };
+
+    // MidiInputCallback — intercept SysEx for CI before it goes to collector
+    void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& msg) override;
 
     // ── Right Panel — Save/Load/Undo ──
     juce::TextButton saveButton { "Save" };
