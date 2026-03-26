@@ -54,6 +54,8 @@ private:
     // Keystage's MUID (learned from Discovery)
     uint8_t keystageMuid[4] = { 0, 0, 0, 0 };
     bool hasXProgramEditSubscription = false;
+    juce::int64 lastUpdateTime = 0;
+    static constexpr int UPDATE_INTERVAL_MS = 100; // max 10 updates/sec
 
     // Parameter mappings (up to 8 knobs → CCs 24-31)
     juce::Array<ParamMapping> mappings;

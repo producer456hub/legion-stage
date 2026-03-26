@@ -64,8 +64,16 @@ void Midi2Handler::handleCC(int ccNumber, int value)
                 float normalized = static_cast<float>(value) / 127.0f;
                 params[m.pluginParamIndex]->setValue(normalized);
 
+                // Throttle OLED updates to prevent MIDI flooding
                 if (hasXProgramEditSubscription && isConnected())
-                    sendParameterUpdate();
+                {
+                    juce::int64 now = juce::Time::currentTimeMillis();
+                    if (now - lastUpdateTime >= UPDATE_INTERVAL_MS)
+                    {
+                        lastUpdateTime = now;
+                        sendParameterUpdate();
+                    }
+                }
             }
             return;
         }
