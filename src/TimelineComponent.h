@@ -29,7 +29,7 @@ private:
     double pixelsPerBeat = 40.0;
     int trackHeight = 40;
     int headerHeight = 20;
-    int trackLabelWidth = 60;
+    int trackLabelWidth = 120;  // wider for arm/select buttons
 
     // Selection / interaction
     struct ClipRef {
@@ -59,9 +59,15 @@ private:
     // Drawing
     void drawHeader(juce::Graphics& g);
     void drawTrackLanes(juce::Graphics& g);
+    void drawTrackControls(juce::Graphics& g);
     void drawClips(juce::Graphics& g);
     void drawPlayhead(juce::Graphics& g);
     void drawMiniNotes(juce::Graphics& g, const MidiClip& clip, juce::Rectangle<float> area);
+
+    // Track control click areas
+    juce::Rectangle<int> getArmButtonRect(int trackIndex) const;
+    juce::Rectangle<int> getSelectButtonRect(int trackIndex) const;
+    void handleTrackControlClick(int trackIndex, float x, float y);
 
     // Coordinate conversion
     float beatToX(double beat) const;

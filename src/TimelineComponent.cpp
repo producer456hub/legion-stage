@@ -124,10 +124,17 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
 
-    if (e.x < trackLabelWidth) return;
-
     float mx = static_cast<float>(e.x);
     float my = static_cast<float>(e.y);
+
+    // Handle clicks in the track control area
+    if (e.x < trackLabelWidth)
+    {
+        int trackIdx = yToTrack(my);
+        if (trackIdx >= 0 && trackIdx < PluginHost::NUM_TRACKS)
+            handleTrackControlClick(trackIdx, mx, my);
+        return;
+    }
     auto hit = hitTestClip(mx, my);
 
     if (e.mods.isRightButtonDown() && hit.isValid())
@@ -572,21 +579,136 @@ void TimelineComponent::drawTrackLanes(juce::Graphics& g)
     {
         int y = headerHeight + t * trackHeight;
 
-        g.setColour(t % 2 == 0 ? juce::Colour(0xff1e1e1e) : juce::Colour(0xff222222));
+        // Selected track highlight
+        bool isSelected = (t == pluginHost.getSelectedTrack());
+        if (isSelected)
+            g.setColour(juce::Colour(0xff2a3a4a));
+        else
+            g.setColour(t % 2 == 0 ? juce::Colour(0xff1e1e1e) : juce::Colour(0xff222222));
         g.fillRect(0, y, getWidth(), trackHeight);
-
-        g.setColour(juce::Colour(0xffaaaaaa));
-        g.setFont(11.0f);
-
-        juce::String label = "Trk " + juce::String(t + 1);
-        auto& track = pluginHost.getTrack(t);
-        if (track.plugin != nullptr)
-            label = track.plugin->getName().substring(0, 8);
-
-        g.drawText(label, 4, y, trackLabelWidth - 8, trackHeight, juce::Justification::centredLeft);
 
         g.setColour(juce::Colour(0xff333333));
         g.drawHorizontalLine(y + trackHeight - 1, 0, static_cast<float>(getWidth()));
+    }
+
+    drawTrackControls(g);
+}
+
+juce::Rectangle<int> TimelineComponent::getSelectButtonRect(int trackIndex) const
+{
+    int y = headerHeight + trackIndex * trackHeight;
+    return { 2, y + 2, 50, trackHeight - 4 };
+}
+
+juce::Rectangle<int> TimelineComponent::getArmButtonRect(int trackIndex) const
+{
+    int y = headerHeight + trackIndex * trackHeight;
+    return { 54, y + 2, 30, (trackHeight - 4) / 2 };
+}
+
+void TimelineComponent::drawTrackControls(juce::Graphics& g)
+{
+    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+    {
+        auto& track = pluginHost.getTrack(t);
+        bool isSelected = (t == pluginHost.getSelectedTrack());
+
+        // Track name/select button
+        auto selRect = getSelectButtonRect(t);
+        g.setColour(isSelected ? juce::Colour(0xff3a5a8a) : juce::Colour(0xff333333));
+        g.fillRoundedRectangle(selRect.toFloat(), 3.0f);
+
+        g.setColour(juce::Colours::white);
+        g.setFont(10.0f);
+        juce::String label = juce::String(t + 1);
+        if (track.plugin != nullptr)
+            label += " " + track.plugin->getName().substring(0, 5);
+        g.drawText(label, selRect, juce::Justification::centred);
+
+        // ARM button
+        auto armRect = getArmButtonRect(t);
+        bool isArmed = track.clipPlayer != nullptr && track.clipPlayer->armed.load();
+        g.setColour(isArmed ? juce::Colours::red.darker() : juce::Colour(0xff444444));
+        g.fillRoundedRectangle(armRect.toFloat(), 2.0f);
+        g.setColour(juce::Colours::white);
+        g.setFont(9.0f);
+        g.drawText("A", armRect, juce::Justification::centred);
+
+        // Mute indicator
+        auto muteRect = juce::Rectangle<int>(54, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+        bool isMuted = track.gainProcessor != nullptr && track.gainProcessor->muted.load();
+        g.setColour(isMuted ? juce::Colours::red : juce::Colour(0xff444444));
+        g.fillRoundedRectangle(muteRect.toFloat(), 2.0f);
+        g.setColour(juce::Colours::white);
+        g.setFont(8.0f);
+        g.drawText("M", muteRect, juce::Justification::centred);
+
+        // Solo indicator
+        auto soloRect = juce::Rectangle<int>(70, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+        bool isSoloed = track.gainProcessor != nullptr && track.gainProcessor->soloed.load();
+        g.setColour(isSoloed ? juce::Colours::yellow : juce::Colour(0xff444444));
+        g.fillRoundedRectangle(soloRect.toFloat(), 2.0f);
+        g.setColour(isSoloed ? juce::Colours::black : juce::Colours::white);
+        g.setFont(8.0f);
+        g.drawText("S", soloRect, juce::Justification::centred);
+
+        // Divider between controls and timeline
+        g.setColour(juce::Colour(0xff444444));
+        g.drawVerticalLine(trackLabelWidth - 1, static_cast<float>(headerHeight),
+                           static_cast<float>(getHeight()));
+    }
+}
+
+void TimelineComponent::handleTrackControlClick(int trackIndex, float x, float y)
+{
+    auto& track = pluginHost.getTrack(trackIndex);
+
+    // Check ARM button
+    auto armRect = getArmButtonRect(trackIndex);
+    if (armRect.toFloat().contains(x, y))
+    {
+        if (track.clipPlayer != nullptr)
+        {
+            bool newState = !track.clipPlayer->armed.load();
+            track.clipPlayer->armed.store(newState);
+        }
+        repaint();
+        return;
+    }
+
+    // Check Mute button
+    auto muteRect = juce::Rectangle<int>(54, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+    if (muteRect.toFloat().contains(x, y))
+    {
+        if (track.gainProcessor != nullptr)
+            track.gainProcessor->muted.store(!track.gainProcessor->muted.load());
+        repaint();
+        return;
+    }
+
+    // Check Solo button
+    auto soloRect = juce::Rectangle<int>(70, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+    if (soloRect.toFloat().contains(x, y))
+    {
+        if (track.gainProcessor != nullptr)
+        {
+            bool was = track.gainProcessor->soloed.load();
+            bool now = !was;
+            track.gainProcessor->soloed.store(now);
+            if (now && !was) pluginHost.soloCount.fetch_add(1);
+            else if (!now && was) pluginHost.soloCount.fetch_sub(1);
+        }
+        repaint();
+        return;
+    }
+
+    // Click on track name = select track
+    auto selRect = getSelectButtonRect(trackIndex);
+    if (selRect.toFloat().contains(x, y))
+    {
+        pluginHost.setSelectedTrack(trackIndex);
+        repaint();
+        return;
     }
 }
 
