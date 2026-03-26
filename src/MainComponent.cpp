@@ -55,6 +55,12 @@ MainComponent::MainComponent()
         else
         {
             eng.stop();
+            // Kill all ringing notes on every track
+            for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+            {
+                auto* cp = pluginHost.getTrack(t).clipPlayer;
+                if (cp) cp->sendAllNotesOff.store(true);
+            }
         }
         updateClipPads();
         if (timelineComponent) timelineComponent->repaint();
@@ -617,6 +623,11 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         if (eng.isPlaying())
         {
             eng.stop();
+            for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+            {
+                auto* cp = pluginHost.getTrack(t).clipPlayer;
+                if (cp) cp->sendAllNotesOff.store(true);
+            }
         }
         else
         {
