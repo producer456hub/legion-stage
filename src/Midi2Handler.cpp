@@ -114,12 +114,14 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
     // Destination MUID (bytes 9-12)
     // uint8_t dstMuid[4] = { data[9], data[10], data[11], data[12] };
 
-    // Log the CI message type for debugging
-    DBG("CI message received: subId2=0x" + juce::String::toHexString(subId2)
-        + " from MUID=" + juce::String::toHexString(srcMuid[0])
-        + "," + juce::String::toHexString(srcMuid[1])
-        + "," + juce::String::toHexString(srcMuid[2])
-        + "," + juce::String::toHexString(srcMuid[3]));
+    // Log incoming CI to file
+    {
+        juce::String inHex;
+        for (int i = 0; i < size; ++i)
+            inHex += juce::String::toHexString(data[i]) + " ";
+        juce::File("C:/dev/sequencer/ci-debug.log").appendText(
+            "IN  0x" + juce::String::toHexString(subId2) + " [" + juce::String(size) + "b]: " + inHex + "\n");
+    }
 
     switch (subId2)
     {
@@ -188,7 +190,7 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
             auto hdrLower = headerStr.toLowerCase();
 
             juce::String responseBody;
-            juce::String responseHeader = "{\"status\":200}";
+            juce::String responseHeader = "{\"status\":200,\"mediaType\":\"application/json\"}";
 
             if (hdrLower.contains("resourcelist"))
                 responseBody = buildResourceList();
@@ -323,6 +325,13 @@ void Midi2Handler::addCISysEx(uint8_t subId2, const uint8_t* destMuid,
         sysex.add(b);
 
     sysex.add(0xF7);       // SysEx end
+
+    // Debug: log the exact bytes to file
+    juce::String hexDump;
+    for (auto b : sysex)
+        hexDump += juce::String::toHexString(b) + " ";
+    juce::File("C:/dev/sequencer/ci-debug.log").appendText(
+        "OUT 0x" + juce::String::toHexString(subId2) + " [" + juce::String(sysex.size()) + "b]: " + hexDump + "\n");
 
     outgoingMidi.addEvent(juce::MidiMessage(sysex.getRawDataPointer(), sysex.size()), 0);
 }
