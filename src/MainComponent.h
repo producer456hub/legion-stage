@@ -107,6 +107,11 @@ private:
     void saveProject();
     void loadProject();
 
+    // ── Right Panel — Presets ──
+    juce::TextButton prevPresetButton { "< Preset" };
+    juce::TextButton nextPresetButton { "Preset >" };
+    juce::Label presetNameLabel;
+
     // ── Right Panel — Mix + Info ──
     juce::Slider volumeSlider;
     juce::Label volumeLabel { {}, "Vol" };

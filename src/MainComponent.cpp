@@ -245,6 +245,44 @@ MainComponent::MainComponent()
         }
     };
 
+    addAndMakeVisible(prevPresetButton);
+    prevPresetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444455));
+    prevPresetButton.onClick = [this] {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.plugin != nullptr)
+        {
+            int current = track.plugin->getCurrentProgram();
+            if (current > 0)
+            {
+                track.plugin->setCurrentProgram(current - 1);
+                presetNameLabel.setText(track.plugin->getProgramName(track.plugin->getCurrentProgram()),
+                    juce::dontSendNotification);
+            }
+        }
+    };
+
+    addAndMakeVisible(nextPresetButton);
+    nextPresetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444455));
+    nextPresetButton.onClick = [this] {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.plugin != nullptr)
+        {
+            int current = track.plugin->getCurrentProgram();
+            if (current < track.plugin->getNumPrograms() - 1)
+            {
+                track.plugin->setCurrentProgram(current + 1);
+                presetNameLabel.setText(track.plugin->getProgramName(track.plugin->getCurrentProgram()),
+                    juce::dontSendNotification);
+            }
+        }
+    };
+
+    addAndMakeVisible(presetNameLabel);
+    presetNameLabel.setJustificationType(juce::Justification::centred);
+    presetNameLabel.setFont(juce::Font(12.0f));
+    presetNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    presetNameLabel.setColour(juce::Label::backgroundColourId, juce::Colour(0xff333333));
+
     addAndMakeVisible(trackInfoLabel);
     trackInfoLabel.setJustificationType(juce::Justification::topLeft);
     trackInfoLabel.setFont(juce::Font(11.0f));
@@ -380,6 +418,21 @@ void MainComponent::updateTrackDisplay()
 
     info += "Armed: " + juce::String(track.clipPlayer && track.clipPlayer->armed.load() ? "Yes" : "No");
     trackInfoLabel.setText(info, juce::dontSendNotification);
+
+    // Update preset display
+    if (track.plugin != nullptr && track.plugin->getNumPrograms() > 0)
+    {
+        presetNameLabel.setText(track.plugin->getProgramName(track.plugin->getCurrentProgram()),
+            juce::dontSendNotification);
+        prevPresetButton.setEnabled(true);
+        nextPresetButton.setEnabled(true);
+    }
+    else
+    {
+        presetNameLabel.setText("No presets", juce::dontSendNotification);
+        prevPresetButton.setEnabled(false);
+        nextPresetButton.setEnabled(false);
+    }
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -887,6 +940,15 @@ void MainComponent::resized()
     undoButton.setBounds(undoRow.removeFromLeft(undoRow.getWidth() / 2 - 2));
     undoRow.removeFromLeft(4);
     redoButton.setBounds(undoRow);
+    rightPanel.removeFromTop(12);
+
+    // Preset browser
+    presetNameLabel.setBounds(rightPanel.removeFromTop(24));
+    rightPanel.removeFromTop(4);
+    auto presetRow = rightPanel.removeFromTop(32);
+    prevPresetButton.setBounds(presetRow.removeFromLeft(presetRow.getWidth() / 2 - 2));
+    presetRow.removeFromLeft(4);
+    nextPresetButton.setBounds(presetRow);
 
     // ── Timeline fills the entire center ──
     area.reduce(2, 2);
