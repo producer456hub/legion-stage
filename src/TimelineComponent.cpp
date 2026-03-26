@@ -143,15 +143,14 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& e)
         int trackIdx = yToTrack(my);
         if (trackIdx >= 0 && trackIdx < PluginHost::NUM_TRACKS)
         {
-            // Check if pressing the ARM button — start long press timer
-            auto armRect = getArmButtonRect(trackIdx);
-            if (armRect.toFloat().contains(mx, my))
+            // Check if pressing the track select button — use long press for lock-arm
+            auto selRect = getSelectButtonRect(trackIdx);
+            if (selRect.toFloat().contains(mx, my))
             {
                 longPressTrack = trackIdx;
                 longPressPos = { mx, my };
                 mouseDownTime = juce::Time::currentTimeMillis();
                 longPressTriggered = false;
-                // Don't handle yet — wait for mouseUp to distinguish tap vs long press
             }
             else
             {
@@ -727,13 +726,19 @@ void TimelineComponent::drawTrackLanes(juce::Graphics& g)
 juce::Rectangle<int> TimelineComponent::getSelectButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    return { 2, y + 2, 70, trackHeight - 4 };
+    return { 2, y + 2, 110, trackHeight - 4 };
 }
 
-juce::Rectangle<int> TimelineComponent::getArmButtonRect(int trackIndex) const
+juce::Rectangle<int> TimelineComponent::getMuteButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    return { 76, y + 2, 36, 24 };
+    return { 116, y + 2, 18, 24 };
+}
+
+juce::Rectangle<int> TimelineComponent::getSoloButtonRect(int trackIndex) const
+{
+    int y = headerHeight + trackIndex * trackHeight;
+    return { 136, y + 2, 18, 24 };
 }
 
 void TimelineComponent::drawTrackControls(juce::Graphics& g)
@@ -742,55 +747,56 @@ void TimelineComponent::drawTrackControls(juce::Graphics& g)
     {
         auto& track = pluginHost.getTrack(t);
         bool isSelected = (t == pluginHost.getSelectedTrack());
-
-        // Track name/select button
-        auto selRect = getSelectButtonRect(t);
-        g.setColour(isSelected ? juce::Colour(0xff3a5a8a) : juce::Colour(0xff333333));
-        g.fillRoundedRectangle(selRect.toFloat(), 3.0f);
-
-        g.setColour(juce::Colours::white);
-        g.setFont(10.0f);
-        juce::String label = juce::String(t + 1);
-        if (track.plugin != nullptr)
-            label += " " + track.plugin->getName().substring(0, 5);
-        g.drawText(label, selRect, juce::Justification::centred);
-
-        // ARM button — bright red if locked, dim red if auto-armed
-        auto armRect = getArmButtonRect(t);
         bool isArmed = track.clipPlayer != nullptr && track.clipPlayer->armed.load();
         bool isLocked = track.clipPlayer != nullptr && track.clipPlayer->armLocked.load();
 
-        if (isLocked)
-            g.setColour(juce::Colours::red);          // bright red = locked
-        else if (isArmed)
-            g.setColour(juce::Colours::red.darker());  // dim red = auto-armed
-        else
-            g.setColour(juce::Colour(0xff444444));      // gray = not armed
+        // Track select button — color shows selection + arm state
+        auto selRect = getSelectButtonRect(t);
 
-        g.fillRoundedRectangle(armRect.toFloat(), 3.0f);
+        if (isLocked)
+            g.setColour(juce::Colour(0xff882222));      // locked arm = deep red
+        else if (isSelected)
+            g.setColour(juce::Colour(0xff3a5a8a));      // selected = blue
+        else
+            g.setColour(juce::Colour(0xff333333));       // normal = gray
+
+        g.fillRoundedRectangle(selRect.toFloat(), 3.0f);
+
+        // Arm indicator dot on the left side
+        if (isArmed || isLocked)
+        {
+            g.setColour(isLocked ? juce::Colours::red : juce::Colours::red.darker());
+            g.fillEllipse(static_cast<float>(selRect.getX() + 4),
+                         static_cast<float>(selRect.getCentreY() - 4), 8.0f, 8.0f);
+        }
+
+        // Track label
         g.setColour(juce::Colours::white);
-        g.setFont(12.0f);
-        g.drawText(isLocked ? "A!" : "A", armRect, juce::Justification::centred);
+        g.setFont(11.0f);
+        juce::String label = juce::String(t + 1);
+        if (track.plugin != nullptr)
+            label += " " + track.plugin->getName().substring(0, 7);
+        g.drawText(label, selRect.reduced(14, 0), juce::Justification::centredLeft);
 
         // Mute button
-        auto muteRect = juce::Rectangle<int>(116, headerHeight + t * trackHeight + 2, 36, 24);
+        auto muteRect = getMuteButtonRect(t);
         bool isMuted = track.gainProcessor != nullptr && track.gainProcessor->muted.load();
         g.setColour(isMuted ? juce::Colours::red : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(muteRect.toFloat(), 3.0f);
+        g.fillRoundedRectangle(muteRect.toFloat(), 2.0f);
         g.setColour(juce::Colours::white);
-        g.setFont(12.0f);
+        g.setFont(10.0f);
         g.drawText("M", muteRect, juce::Justification::centred);
 
         // Solo button
-        auto soloRect = juce::Rectangle<int>(76, headerHeight + t * trackHeight + 28, 36, 24);
+        auto soloRect = getSoloButtonRect(t);
         bool isSoloed = track.gainProcessor != nullptr && track.gainProcessor->soloed.load();
         g.setColour(isSoloed ? juce::Colours::yellow : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(soloRect.toFloat(), 3.0f);
+        g.fillRoundedRectangle(soloRect.toFloat(), 2.0f);
         g.setColour(isSoloed ? juce::Colours::black : juce::Colours::white);
-        g.setFont(12.0f);
+        g.setFont(10.0f);
         g.drawText("S", soloRect, juce::Justification::centred);
 
-        // Divider between controls and timeline
+        // Divider
         g.setColour(juce::Colour(0xff444444));
         g.drawVerticalLine(trackLabelWidth - 1, static_cast<float>(headerHeight),
                            static_cast<float>(getHeight()));
@@ -801,23 +807,8 @@ void TimelineComponent::handleTrackControlClick(int trackIndex, float x, float y
 {
     auto& track = pluginHost.getTrack(trackIndex);
 
-    // ARM button is handled in mouseDown/mouseUp for long press detection
-    // Shift+click still works as a shortcut
-    auto armRect = getArmButtonRect(trackIndex);
-    if (armRect.toFloat().contains(x, y))
-    {
-        if (track.clipPlayer != nullptr && juce::ModifierKeys::currentModifiers.isShiftDown())
-        {
-            bool wasLocked = track.clipPlayer->armLocked.load();
-            track.clipPlayer->armLocked.store(!wasLocked);
-            track.clipPlayer->armed.store(!wasLocked);
-            repaint();
-        }
-        return;
-    }
-
     // Check Mute button
-    auto muteRect = juce::Rectangle<int>(116, headerHeight + trackIndex * trackHeight + 2, 36, 24);
+    auto muteRect = getMuteButtonRect(trackIndex);
     if (muteRect.toFloat().contains(x, y))
     {
         if (track.gainProcessor != nullptr)
@@ -827,7 +818,7 @@ void TimelineComponent::handleTrackControlClick(int trackIndex, float x, float y
     }
 
     // Check Solo button
-    auto soloRect = juce::Rectangle<int>(76, headerHeight + trackIndex * trackHeight + 28, 36, 24);
+    auto soloRect = getSoloButtonRect(trackIndex);
     if (soloRect.toFloat().contains(x, y))
     {
         if (track.gainProcessor != nullptr)

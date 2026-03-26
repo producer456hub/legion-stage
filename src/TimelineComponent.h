@@ -87,8 +87,9 @@ private:
     void drawMiniNotes(juce::Graphics& g, const MidiClip& clip, juce::Rectangle<float> area);
 
     // Track control click areas
-    juce::Rectangle<int> getArmButtonRect(int trackIndex) const;
     juce::Rectangle<int> getSelectButtonRect(int trackIndex) const;
+    juce::Rectangle<int> getMuteButtonRect(int trackIndex) const;
+    juce::Rectangle<int> getSoloButtonRect(int trackIndex) const;
     void handleTrackControlClick(int trackIndex, float x, float y);
 
     // Long press detection for arm lock
