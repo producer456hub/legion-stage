@@ -27,20 +27,44 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
         }
     }
 
-    // Check if any armed slots should start recording (transport just started)
-    if (engine.isPlaying() && engine.isRecording() && recordingSlot < 0)
+    // Check if we should start recording
+    if (engine.isPlaying() && engine.isRecording() && armed.load() && recordingSlot < 0)
     {
+        // First check for explicitly armed slots
+        int targetSlot = -1;
         for (int i = 0; i < NUM_SLOTS; ++i)
         {
             if (slots[static_cast<size_t>(i)].state.load() == ClipSlot::Armed)
             {
-                auto& armSlot = slots[static_cast<size_t>(i)];
-                armSlot.clip->timelinePosition = engine.getPositionInBeats();
-                armSlot.state.store(ClipSlot::Recording);
-                recordingSlot = i;
-                recordStartBeat = engine.getPositionInBeats();
+                targetSlot = i;
                 break;
             }
+        }
+
+        // If no slot is armed, auto-find an empty slot (arrangement view flow)
+        if (targetSlot < 0)
+        {
+            for (int i = 0; i < NUM_SLOTS; ++i)
+            {
+                auto state = slots[static_cast<size_t>(i)].state.load();
+                if (state == ClipSlot::Empty ||
+                    (slots[static_cast<size_t>(i)].clip != nullptr && !slots[static_cast<size_t>(i)].hasContent() && state == ClipSlot::Stopped))
+                {
+                    targetSlot = i;
+                    break;
+                }
+            }
+        }
+
+        if (targetSlot >= 0)
+        {
+            auto& slot = slots[static_cast<size_t>(targetSlot)];
+            if (slot.clip == nullptr)
+                slot.clip = std::make_unique<MidiClip>();
+            slot.clip->timelinePosition = engine.getPositionInBeats();
+            slot.state.store(ClipSlot::Recording);
+            recordingSlot = targetSlot;
+            recordStartBeat = engine.getPositionInBeats();
         }
     }
 
@@ -48,22 +72,6 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     if (recordingSlot >= 0 && engine.isPlaying())
     {
         processRecording(midi, numSamples);
-    }
-
-    // DEBUG: log MIDI activity
-    if (!midi.isEmpty())
-    {
-        for (const auto metadata : midi)
-        {
-            if (metadata.getMessage().isNoteOn())
-            {
-                juce::File logFile(juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("seq-debug.log"));
-                logFile.appendText("MIDI NoteOn=" + juce::String(metadata.getMessage().getNoteNumber())
-                    + " recSlot=" + juce::String(recordingSlot)
-                    + " playing=" + juce::String(engine.isPlaying() ? 1 : 0)
-                    + " armed=" + juce::String(armed.load() ? 1 : 0) + "\n");
-            }
-        }
     }
 
     // Handle playback for all playing clips
