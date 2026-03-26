@@ -187,22 +187,35 @@ MainComponent::MainComponent()
     addAndMakeVisible(volumeSlider);
     volumeSlider.setRange(0.0, 1.0, 0.01);
     volumeSlider.setValue(0.8, juce::dontSendNotification);
-    volumeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    volumeSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    volumeSlider.setSliderStyle(juce::Slider::LinearVertical);
+    volumeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 18);
     volumeSlider.onValueChange = [this] {
         auto& track = pluginHost.getTrack(selectedTrackIndex);
         if (track.gainProcessor) track.gainProcessor->volume.store(static_cast<float>(volumeSlider.getValue()));
     };
 
+    addAndMakeVisible(volumeLabel);
+    volumeLabel.setJustificationType(juce::Justification::centred);
+    volumeLabel.setFont(juce::Font(12.0f));
+
     addAndMakeVisible(panSlider);
     panSlider.setRange(-1.0, 1.0, 0.01);
     panSlider.setValue(0.0, juce::dontSendNotification);
-    panSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    panSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    panSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    panSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 18);
     panSlider.onValueChange = [this] {
         auto& track = pluginHost.getTrack(selectedTrackIndex);
         if (track.gainProcessor) track.gainProcessor->pan.store(static_cast<float>(panSlider.getValue()));
     };
+
+    addAndMakeVisible(panLabel);
+    panLabel.setJustificationType(juce::Justification::centred);
+    panLabel.setFont(juce::Font(12.0f));
+
+    addAndMakeVisible(trackInfoLabel);
+    trackInfoLabel.setJustificationType(juce::Justification::topLeft);
+    trackInfoLabel.setFont(juce::Font(11.0f));
+    trackInfoLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaaaaaa));
 
     addAndMakeVisible(statusLabel);
     statusLabel.setJustificationType(juce::Justification::centred);
@@ -288,6 +301,33 @@ void MainComponent::updateTrackDisplay()
         volumeSlider.setValue(track.gainProcessor->volume.load(), juce::dontSendNotification);
         panSlider.setValue(track.gainProcessor->pan.load(), juce::dontSendNotification);
     }
+
+    // Track info
+    juce::String info;
+    if (track.plugin != nullptr)
+        info += "Plugin: " + track.plugin->getName() + "\n";
+    else
+        info += "Plugin: (none)\n";
+
+    if (track.clipPlayer != nullptr)
+    {
+        int clipCount = 0;
+        int totalNotes = 0;
+        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+        {
+            auto& slot = track.clipPlayer->getSlot(s);
+            if (slot.hasContent())
+            {
+                clipCount++;
+                totalNotes += slot.clip->events.getNumEvents() / 2; // note on+off pairs
+            }
+        }
+        info += "Clips: " + juce::String(clipCount) + "\n";
+        info += "Notes: " + juce::String(totalNotes) + "\n";
+    }
+
+    info += "Armed: " + juce::String(track.clipPlayer && track.clipPlayer->armed.load() ? "Yes" : "No");
+    trackInfoLabel.setText(info, juce::dontSendNotification);
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -493,10 +533,6 @@ void MainComponent::resized()
     bottomBar.removeFromLeft(2);
     zoomInButton.setBounds(bottomBar.removeFromLeft(60));
     bottomBar.removeFromLeft(8);
-    volumeSlider.setBounds(bottomBar.removeFromLeft(120));
-    bottomBar.removeFromLeft(4);
-    panSlider.setBounds(bottomBar.removeFromLeft(80));
-    bottomBar.removeFromLeft(8);
     statusLabel.setBounds(bottomBar);
 
     // ── Edit Toolbar ──
@@ -518,15 +554,32 @@ void MainComponent::resized()
     // ── Right Panel ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
 
-    pluginSelector.setBounds(rightPanel.removeFromTop(32));
-    rightPanel.removeFromTop(6);
-    openEditorButton.setBounds(rightPanel.removeFromTop(36));
-    rightPanel.removeFromTop(6);
-    testNoteButton.setBounds(rightPanel.removeFromTop(36));
+    pluginSelector.setBounds(rightPanel.removeFromTop(30));
+    rightPanel.removeFromTop(4);
+    openEditorButton.setBounds(rightPanel.removeFromTop(32));
+    rightPanel.removeFromTop(4);
+    testNoteButton.setBounds(rightPanel.removeFromTop(32));
+    rightPanel.removeFromTop(8);
+    midiInputSelector.setBounds(rightPanel.removeFromTop(30));
+    rightPanel.removeFromTop(4);
+    audioSettingsButton.setBounds(rightPanel.removeFromTop(32));
     rightPanel.removeFromTop(12);
-    midiInputSelector.setBounds(rightPanel.removeFromTop(32));
-    rightPanel.removeFromTop(6);
-    audioSettingsButton.setBounds(rightPanel.removeFromTop(36));
+
+    // Volume fader + Pan knob side by side
+    auto mixArea = rightPanel.removeFromTop(juce::jmin(180, rightPanel.getHeight() / 2));
+    auto volArea = mixArea.removeFromLeft(mixArea.getWidth() / 2);
+    auto panArea = mixArea;
+
+    volumeLabel.setBounds(volArea.removeFromTop(18));
+    volumeSlider.setBounds(volArea);
+
+    panLabel.setBounds(panArea.removeFromTop(18));
+    panSlider.setBounds(panArea.reduced(10, 0));
+
+    rightPanel.removeFromTop(8);
+
+    // Track info fills remaining space
+    trackInfoLabel.setBounds(rightPanel);
 
     // ── Timeline fills the entire center ──
     area.reduce(2, 2);

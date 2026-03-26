@@ -82,9 +82,14 @@ private:
     juce::TextButton audioSettingsButton { "Audio Settings" };
     juce::TextButton testNoteButton { "Test Note" };
 
-    // ── Bottom Bar ──
+    // ── Right Panel — Mix + Info ──
     juce::Slider volumeSlider;
+    juce::Label volumeLabel { {}, "Vol" };
     juce::Slider panSlider;
+    juce::Label panLabel { {}, "Pan" };
+    juce::Label trackInfoLabel;
+
+    // ── Bottom Bar ──
     juce::Label statusLabel;
 
     // ── Timeline (arrangement view) ──
