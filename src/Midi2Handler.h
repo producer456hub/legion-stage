@@ -53,6 +53,7 @@ private:
 
     // Keystage's MUID (learned from Discovery)
     uint8_t keystageMuid[4] = { 0, 0, 0, 0 };
+    bool hasXProgramEditSubscription = false;
 
     // Parameter mappings (up to 8 knobs → CCs 24-31)
     juce::Array<ParamMapping> mappings;

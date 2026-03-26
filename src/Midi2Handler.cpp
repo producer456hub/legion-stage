@@ -63,6 +63,10 @@ void Midi2Handler::handleCC(int ccNumber, int value)
             {
                 float normalized = static_cast<float>(value) / 127.0f;
                 params[m.pluginParamIndex]->setValue(normalized);
+
+                // Push updated values to Keystage if subscribed
+                if (hasXProgramEditSubscription && isConnected())
+                    sendParameterUpdate();
             }
             return;
         }
@@ -218,14 +222,65 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
             return true;
         }
 
-        case 0x38: // Subscription
+        case 0x38: // Subscription request
         {
             if (size < 16) return true;
 
             uint8_t requestId = data[13];
-            // Just accept all subscriptions
-            juce::String responseHeader = "{\"status\":200}";
-            sendPropertyReply(srcMuid, requestId, responseHeader, "");
+
+            // Extract the header to check what resource
+            int headerLen = data[14] | (data[15] << 7);
+            juce::String subHeader;
+            for (int i = 0; i < headerLen && (16 + i) < size; ++i)
+                subHeader += juce::String::charToString(static_cast<char>(data[16 + i]));
+
+            auto subLower = subHeader.toLowerCase();
+
+            if (subLower.contains("x-programedit") && subLower.contains("start"))
+            {
+                // Accept subscription — reply with 0x39 and include subscribeId + the current values
+                hasXProgramEditSubscription = true;
+
+                juce::String replyHeader = "{\"status\":200,\"subscribeId\":\"xpe1\",\"command\":\"start\",\"resource\":\"X-ProgramEdit\"}";
+                juce::String replyBody = buildProgramEdit();
+
+                // Send as Subscription Reply (0x39)
+                auto hdrBytes = encodeJsonForSysex(replyHeader);
+                auto bodyBytes = encodeJsonForSysex(replyBody);
+
+                juce::Array<uint8_t> payload;
+                payload.add(requestId);
+
+                payload.add(static_cast<uint8_t>(hdrBytes.size() & 0x7F));
+                payload.add(static_cast<uint8_t>((hdrBytes.size() >> 7) & 0x7F));
+                payload.addArray(hdrBytes);
+
+                payload.add(0x01); payload.add(0x00);
+                payload.add(0x01); payload.add(0x00);
+
+                payload.add(static_cast<uint8_t>(bodyBytes.size() & 0x7F));
+                payload.add(static_cast<uint8_t>((bodyBytes.size() >> 7) & 0x7F));
+                payload.addArray(bodyBytes);
+
+                addCISysEx(0x39, srcMuid, payload); // 0x39 = Subscription Reply
+            }
+            else
+            {
+                // Generic subscription accept
+                juce::String replyHeader = "{\"status\":200}";
+                auto hdrBytes = encodeJsonForSysex(replyHeader);
+
+                juce::Array<uint8_t> payload;
+                payload.add(requestId);
+                payload.add(static_cast<uint8_t>(hdrBytes.size() & 0x7F));
+                payload.add(static_cast<uint8_t>((hdrBytes.size() >> 7) & 0x7F));
+                payload.addArray(hdrBytes);
+                payload.add(0x01); payload.add(0x00);
+                payload.add(0x01); payload.add(0x00);
+                payload.add(0x00); payload.add(0x00);
+
+                addCISysEx(0x39, srcMuid, payload);
+            }
             return true;
         }
 
