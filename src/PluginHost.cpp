@@ -150,7 +150,22 @@ void PluginHost::connectTrackAudio(int trackIndex)
 void PluginHost::setSelectedTrack(int index)
 {
     if (index < 0 || index >= NUM_TRACKS) return;
+
+    // Disarm previous track
+    if (selectedTrack != index)
+    {
+        auto& oldTrack = tracks[static_cast<size_t>(selectedTrack)];
+        if (oldTrack.clipPlayer != nullptr)
+            oldTrack.clipPlayer->armed.store(false);
+    }
+
     selectedTrack = index;
+
+    // Auto-arm new track
+    auto& newTrack = tracks[static_cast<size_t>(selectedTrack)];
+    if (newTrack.clipPlayer != nullptr)
+        newTrack.clipPlayer->armed.store(true);
+
     updateMidiRouting();
 }
 
