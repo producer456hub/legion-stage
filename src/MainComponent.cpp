@@ -184,6 +184,24 @@ MainComponent::MainComponent()
     addAndMakeVisible(audioSettingsButton);
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
 
+    addAndMakeVisible(midi2Button);
+    midi2Button.setClickingTogglesState(true);
+    midi2Button.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
+    midi2Button.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff446688));
+    midi2Button.onClick = [this] {
+        midi2Enabled = midi2Button.getToggleState();
+        if (midi2Enabled)
+        {
+            auto& track = pluginHost.getTrack(selectedTrackIndex);
+            midi2Handler.setPlugin(track.plugin);
+            statusLabel.setText("MIDI 2.0 CI enabled — waiting for controller...", juce::dontSendNotification);
+        }
+        else
+        {
+            statusLabel.setText("MIDI 2.0 CI disabled", juce::dontSendNotification);
+        }
+    };
+
     addAndMakeVisible(testNoteButton);
     testNoteButton.onClick = [this] { playTestNote(); };
     testNoteButton.setEnabled(false);
@@ -439,6 +457,10 @@ void MainComponent::updateTrackDisplay()
     trackInfoLabel.setText(info, juce::dontSendNotification);
 
     updateParamSliders();
+
+    // Update MIDI 2.0 handler
+    if (midi2Enabled)
+        midi2Handler.setPlugin(track.plugin);
 
 }
 
@@ -995,7 +1017,9 @@ void MainComponent::resized()
     midiInputSelector.setBounds(rightPanel.removeFromTop(30));
     rightPanel.removeFromTop(4);
     audioSettingsButton.setBounds(rightPanel.removeFromTop(32));
-    rightPanel.removeFromTop(12);
+    rightPanel.removeFromTop(4);
+    midi2Button.setBounds(rightPanel.removeFromTop(32));
+    rightPanel.removeFromTop(8);
 
     // Volume fader + Pan knob side by side
     auto mixArea = rightPanel.removeFromTop(juce::jmin(180, rightPanel.getHeight() / 2));

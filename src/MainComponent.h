@@ -5,6 +5,7 @@
 #include "PluginHost.h"
 #include "PianoRollComponent.h"
 #include "TimelineComponent.h"
+#include "Midi2Handler.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -108,6 +109,11 @@ private:
     void saveProject();
     void loadProject();
 
+
+    // ── MIDI 2.0 CI ──
+    Midi2Handler midi2Handler;
+    juce::TextButton midi2Button { "MIDI 2.0" };
+    bool midi2Enabled = false;
 
     // ── Plugin Parameters ──
     static constexpr int NUM_PARAM_SLIDERS = 6;

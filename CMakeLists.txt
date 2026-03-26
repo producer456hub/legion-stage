@@ -28,6 +28,8 @@ target_sources(Sequencer PRIVATE
     src/SequencerEngine.cpp
     src/PianoRollComponent.h
     src/PianoRollComponent.cpp
+    src/Midi2Handler.h
+    src/Midi2Handler.cpp
     src/TimelineComponent.h
     src/TimelineComponent.cpp
 )
@@ -50,6 +52,7 @@ target_link_libraries(Sequencer PRIVATE
     juce::juce_audio_utils
     juce::juce_audio_devices
     juce::juce_audio_processors
+    juce::juce_midi_ci
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
 )
