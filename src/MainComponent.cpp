@@ -80,6 +80,42 @@ MainComponent::MainComponent()
     addAndMakeVisible(beatLabel);
     beatLabel.setFont(juce::Font(14.0f));
 
+    // ── Edit Toolbar ──
+    addAndMakeVisible(newClipButton);
+    newClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff336655));
+    newClipButton.onClick = [this] {
+        if (timelineComponent) timelineComponent->createClipAtPlayhead();
+    };
+
+    addAndMakeVisible(deleteClipButton);
+    deleteClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff553333));
+    deleteClipButton.onClick = [this] {
+        if (timelineComponent) timelineComponent->deleteSelected();
+    };
+
+    addAndMakeVisible(duplicateClipButton);
+    duplicateClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff335555));
+    duplicateClipButton.onClick = [this] {
+        if (timelineComponent) timelineComponent->duplicateSelected();
+    };
+
+    addAndMakeVisible(splitClipButton);
+    splitClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff555533));
+    splitClipButton.onClick = [this] {
+        if (timelineComponent) timelineComponent->splitSelected();
+    };
+
+    addAndMakeVisible(editClipButton);
+    editClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff335566));
+    editClipButton.onClick = [this] {
+        if (timelineComponent)
+        {
+            auto* clip = timelineComponent->getSelectedClip();
+            if (clip != nullptr)
+                new PianoRollWindow("Piano Roll", *clip, pluginHost.getEngine());
+        }
+    };
+
     // ── Right Panel ──
     addAndMakeVisible(pluginSelector);
     pluginSelector.onChange = [this] { loadSelectedPlugin(); };
@@ -393,6 +429,18 @@ void MainComponent::resized()
     panSlider.setBounds(bottomBar.removeFromLeft(100));
     bottomBar.removeFromLeft(8);
     statusLabel.setBounds(bottomBar);
+
+    // ── Edit Toolbar ──
+    auto toolbar = area.removeFromTop(40).reduced(6, 4);
+    newClipButton.setBounds(toolbar.removeFromLeft(90));
+    toolbar.removeFromLeft(4);
+    deleteClipButton.setBounds(toolbar.removeFromLeft(75));
+    toolbar.removeFromLeft(4);
+    duplicateClipButton.setBounds(toolbar.removeFromLeft(90));
+    toolbar.removeFromLeft(4);
+    splitClipButton.setBounds(toolbar.removeFromLeft(65));
+    toolbar.removeFromLeft(4);
+    editClipButton.setBounds(toolbar.removeFromLeft(90));
 
     // ── Right Panel ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);

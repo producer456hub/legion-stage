@@ -59,6 +59,13 @@ private:
     juce::Slider bpmSlider;
     juce::Label beatLabel;
 
+    // ── Edit Toolbar ──
+    juce::TextButton newClipButton { "New Clip" };
+    juce::TextButton deleteClipButton { "Delete" };
+    juce::TextButton duplicateClipButton { "Duplicate" };
+    juce::TextButton splitClipButton { "Split" };
+    juce::TextButton editClipButton { "Edit Notes" };
+
     // ── Right Panel ──
     juce::ComboBox pluginSelector;
     juce::TextButton openEditorButton { "Open Editor" };

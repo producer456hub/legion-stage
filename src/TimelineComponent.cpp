@@ -500,6 +500,44 @@ void TimelineComponent::splitClipAtBeat(const ClipRef& ref, double beat)
     repaint();
 }
 
+void TimelineComponent::createClipAtPlayhead()
+{
+    int trackIdx = pluginHost.getSelectedTrack();
+    double beatPos = pluginHost.getEngine().getPositionInBeats();
+    beatPos = std::floor(beatPos); // snap to beat
+    if (beatPos < 0.0) beatPos = 0.0;
+    createEmptyClip(trackIdx, beatPos);
+}
+
+void TimelineComponent::deleteSelected()
+{
+    deleteSelectedClip();
+}
+
+void TimelineComponent::duplicateSelected()
+{
+    duplicateSelectedClip();
+}
+
+void TimelineComponent::splitSelected()
+{
+    if (!selectedClip.isValid()) return;
+    auto* clip = getClip(selectedClip);
+    if (clip == nullptr) return;
+
+    double playheadBeat = pluginHost.getEngine().getPositionInBeats();
+    double clipStart = clip->timelinePosition;
+    double clipEnd = clipStart + clip->lengthInBeats;
+
+    if (playheadBeat > clipStart && playheadBeat < clipEnd)
+        splitClipAtBeat(selectedClip, playheadBeat);
+}
+
+MidiClip* TimelineComponent::getSelectedClip()
+{
+    return getClip(selectedClip);
+}
+
 void TimelineComponent::createEmptyClip(int trackIndex, double beatPos)
 {
     auto* cp = pluginHost.getTrack(trackIndex).clipPlayer;

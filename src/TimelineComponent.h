@@ -10,6 +10,14 @@ class TimelineComponent : public juce::Component, public juce::Timer
 public:
     TimelineComponent(PluginHost& host);
 
+    // Public editing actions (called from toolbar)
+    void createClipAtPlayhead();
+    void deleteSelected();
+    void duplicateSelected();
+    void splitSelected();
+    bool hasSelection() const { return selectedClip.isValid(); }
+    MidiClip* getSelectedClip();
+
     void paint(juce::Graphics& g) override;
     void resized() override;
     void timerCallback() override;
