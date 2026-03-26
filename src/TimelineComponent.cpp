@@ -323,6 +323,14 @@ void TimelineComponent::mouseUp(const juce::MouseEvent& /*e*/)
         repaint();
     }
 
+    // After moving/resizing a clip, set it to Playing so it produces sound
+    if (dragMode != NoDrag && dragClip.isValid())
+    {
+        auto* slot = getSlot(dragClip);
+        if (slot != nullptr && slot->hasContent())
+            slot->state.store(ClipSlot::Playing);
+    }
+
     dragMode = NoDrag;
     dragClip = {};
 }
@@ -479,7 +487,7 @@ void TimelineComponent::duplicateSelectedClip()
     newClip->events.updateMatchedPairs();
 
     cp->getSlot(emptySlot).clip = std::move(newClip);
-    cp->getSlot(emptySlot).state.store(ClipSlot::Stopped);
+    cp->getSlot(emptySlot).state.store(ClipSlot::Playing);
 
     selectedClip = { selectedClip.trackIndex, emptySlot };
     repaint();
@@ -545,7 +553,7 @@ void TimelineComponent::splitClipAtBeat(const ClipRef& ref, double beat)
     // Set up second half
     newClip->events = secondHalf;
     cp->getSlot(emptySlot).clip = std::move(newClip);
-    cp->getSlot(emptySlot).state.store(ClipSlot::Stopped);
+    cp->getSlot(emptySlot).state.store(ClipSlot::Playing);
 
     repaint();
 }
