@@ -597,13 +597,13 @@ void TimelineComponent::drawTrackLanes(juce::Graphics& g)
 juce::Rectangle<int> TimelineComponent::getSelectButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    return { 2, y + 2, 50, trackHeight - 4 };
+    return { 2, y + 2, 70, trackHeight - 4 };
 }
 
 juce::Rectangle<int> TimelineComponent::getArmButtonRect(int trackIndex) const
 {
     int y = headerHeight + trackIndex * trackHeight;
-    return { 54, y + 2, 30, (trackHeight - 4) / 2 };
+    return { 76, y + 2, 36, 24 };
 }
 
 void TimelineComponent::drawTrackControls(juce::Graphics& g)
@@ -629,27 +629,27 @@ void TimelineComponent::drawTrackControls(juce::Graphics& g)
         auto armRect = getArmButtonRect(t);
         bool isArmed = track.clipPlayer != nullptr && track.clipPlayer->armed.load();
         g.setColour(isArmed ? juce::Colours::red.darker() : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(armRect.toFloat(), 2.0f);
+        g.fillRoundedRectangle(armRect.toFloat(), 3.0f);
         g.setColour(juce::Colours::white);
-        g.setFont(9.0f);
+        g.setFont(12.0f);
         g.drawText("A", armRect, juce::Justification::centred);
 
-        // Mute indicator
-        auto muteRect = juce::Rectangle<int>(54, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+        // Mute button
+        auto muteRect = juce::Rectangle<int>(116, headerHeight + t * trackHeight + 2, 36, 24);
         bool isMuted = track.gainProcessor != nullptr && track.gainProcessor->muted.load();
         g.setColour(isMuted ? juce::Colours::red : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(muteRect.toFloat(), 2.0f);
+        g.fillRoundedRectangle(muteRect.toFloat(), 3.0f);
         g.setColour(juce::Colours::white);
-        g.setFont(8.0f);
+        g.setFont(12.0f);
         g.drawText("M", muteRect, juce::Justification::centred);
 
-        // Solo indicator
-        auto soloRect = juce::Rectangle<int>(70, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+        // Solo button
+        auto soloRect = juce::Rectangle<int>(76, headerHeight + t * trackHeight + 28, 36, 24);
         bool isSoloed = track.gainProcessor != nullptr && track.gainProcessor->soloed.load();
         g.setColour(isSoloed ? juce::Colours::yellow : juce::Colour(0xff444444));
-        g.fillRoundedRectangle(soloRect.toFloat(), 2.0f);
+        g.fillRoundedRectangle(soloRect.toFloat(), 3.0f);
         g.setColour(isSoloed ? juce::Colours::black : juce::Colours::white);
-        g.setFont(8.0f);
+        g.setFont(12.0f);
         g.drawText("S", soloRect, juce::Justification::centred);
 
         // Divider between controls and timeline
@@ -677,7 +677,7 @@ void TimelineComponent::handleTrackControlClick(int trackIndex, float x, float y
     }
 
     // Check Mute button
-    auto muteRect = juce::Rectangle<int>(54, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+    auto muteRect = juce::Rectangle<int>(116, headerHeight + trackIndex * trackHeight + 2, 36, 24);
     if (muteRect.toFloat().contains(x, y))
     {
         if (track.gainProcessor != nullptr)
@@ -687,7 +687,7 @@ void TimelineComponent::handleTrackControlClick(int trackIndex, float x, float y
     }
 
     // Check Solo button
-    auto soloRect = juce::Rectangle<int>(70, armRect.getBottom() + 1, 14, (trackHeight - 4) / 2 - 1);
+    auto soloRect = juce::Rectangle<int>(76, headerHeight + trackIndex * trackHeight + 28, 36, 24);
     if (soloRect.toFloat().contains(x, y))
     {
         if (track.gainProcessor != nullptr)

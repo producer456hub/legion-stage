@@ -27,9 +27,9 @@ private:
     // View state
     double scrollX = 0.0;
     double pixelsPerBeat = 40.0;
-    int trackHeight = 40;
-    int headerHeight = 20;
-    int trackLabelWidth = 120;  // wider for arm/select buttons
+    int trackHeight = 56;      // taller for touch-friendly buttons
+    int headerHeight = 24;
+    int trackLabelWidth = 160;  // wide enough for big buttons
 
     // Selection / interaction
     struct ClipRef {
