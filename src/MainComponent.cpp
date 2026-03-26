@@ -614,20 +614,31 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
                 midi2Handler.clearOutgoing();
             }
 
-            juce::MessageManager::callAsync([this] {
-                statusLabel.setText(midi2Handler.isConnected()
-                    ? "MIDI 2.0: Keystage connected!" : "MIDI 2.0: CI message received",
+            juce::MessageManager::callAsync([this, msg] {
+                auto data = msg.getSysExData();
+                int subId = (msg.getSysExDataSize() > 3) ? data[3] : 0;
+                statusLabel.setText("CI 0x" + juce::String::toHexString(subId)
+                    + (midi2Handler.isConnected() ? " [Connected]" : ""),
                     juce::dontSendNotification);
             });
 
             return; // Don't forward CI SysEx to the audio engine
         }
 
-        // Handle CC 24-31 from Keystage knobs
-        if (msg.isController() && msg.getControllerNumber() >= 24 && msg.getControllerNumber() <= 31)
+        // Handle ALL CCs from Keystage — show what's coming in
+        if (msg.isController())
         {
-            midi2Handler.handleCC(msg.getControllerNumber(), msg.getControllerValue());
-            // Don't return — still forward to collector for recording
+            int cc = msg.getControllerNumber();
+            int val = msg.getControllerValue();
+
+            juce::MessageManager::callAsync([this, cc, val] {
+                statusLabel.setText("CC " + juce::String(cc) + " = " + juce::String(val),
+                    juce::dontSendNotification);
+            });
+
+            // Map CC 24-31 to plugin parameters
+            if (cc >= 24 && cc <= 31)
+                midi2Handler.handleCC(cc, val);
         }
     }
 

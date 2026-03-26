@@ -114,6 +114,13 @@ bool Midi2Handler::processIncoming(const juce::MidiMessage& msg)
     // Destination MUID (bytes 9-12)
     // uint8_t dstMuid[4] = { data[9], data[10], data[11], data[12] };
 
+    // Log the CI message type for debugging
+    DBG("CI message received: subId2=0x" + juce::String::toHexString(subId2)
+        + " from MUID=" + juce::String::toHexString(srcMuid[0])
+        + "," + juce::String::toHexString(srcMuid[1])
+        + "," + juce::String::toHexString(srcMuid[2])
+        + "," + juce::String::toHexString(srcMuid[3]));
+
     switch (subId2)
     {
         case 0x70: // Discovery (Keystage is looking for us)
