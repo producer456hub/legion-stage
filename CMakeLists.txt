@@ -47,7 +47,7 @@ target_sources(Sequencer PRIVATE
     src/SpectrumComponent.h
     src/LissajousComponent.h
     src/GForceComponent.h
-    src/MilkDropComponent.h
+    src/GeissComponent.h
     src/ThemeManager.h
     src/TimelineComponent.h
     src/TimelineComponent.cpp
@@ -65,8 +65,6 @@ target_compile_definitions(Sequencer PRIVATE
 # Point JUCE to the ASIO SDK headers
 target_include_directories(Sequencer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/asio-sdk/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/projectm/src/api/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/projectm/build/src/api/include
 )
 
 target_link_libraries(Sequencer PRIVATE
@@ -77,6 +75,5 @@ target_link_libraries(Sequencer PRIVATE
     juce::juce_opengl
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/projectm/build/src/libprojectM/projectM-4.lib
     opengl32
 )

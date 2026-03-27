@@ -20,15 +20,9 @@ MainComponent::MainComponent()
     gforceDisplay.setVisible(false);
     pluginHost.gforceDisplay = &gforceDisplay;
 
-    addAndMakeVisible(milkdropDisplay);
-    milkdropDisplay.setVisible(false);
-    // Try common preset locations
-    juce::File presetDir("C:/Program Files/Legion Stage/milkdrop-presets");
-    if (!presetDir.isDirectory())
-        presetDir = juce::File::getSpecialLocation(juce::File::currentApplicationFile)
-            .getParentDirectory().getChildFile("milkdrop-presets");
-    milkdropDisplay.setPresetPath(presetDir.getFullPathName());
-    pluginHost.milkdropDisplay = &milkdropDisplay;
+    addAndMakeVisible(geissDisplay);
+    geissDisplay.setVisible(false);
+    pluginHost.geissDisplay = &geissDisplay;
 
     if (auto* device = deviceManager.getCurrentAudioDevice())
     {
@@ -289,26 +283,160 @@ MainComponent::MainComponent()
 
     addAndMakeVisible(visSelector);
     visSelector.addItem("Spectrum", 1);
-    visSelector.addItem("G-Force", 2);
-    visSelector.addItem("MilkDrop", 3);
+    visSelector.addItem("Lissajous", 2);
+    visSelector.addItem("G-Force", 3);
+    visSelector.addItem("Geiss", 4);
     visSelector.setSelectedId(1, juce::dontSendNotification);
     visSelector.onChange = [this] {
         currentVisMode = visSelector.getSelectedId() - 1;
-        if (visualizerFullScreen) { resized(); repaint(); }
+        resized();
+        repaint();
     };
-
-    addAndMakeVisible(nextPresetButton);
-    nextPresetButton.onClick = [this] { milkdropDisplay.nextPreset(); };
 
     addAndMakeVisible(visExitButton);
     visExitButton.setVisible(false);
     visExitButton.onClick = [this] {
         visualizerFullScreen = false;
+        projectorMode = false;
         fullscreenButton.setToggleState(false, juce::dontSendNotification);
+        projectorButton.setToggleState(false, juce::dontSendNotification);
         resized();
         repaint();
         grabKeyboardFocus();
     };
+
+    addAndMakeVisible(projectorButton);
+    projectorButton.setClickingTogglesState(true);
+    projectorButton.onClick = [this] {
+        projectorMode = projectorButton.getToggleState();
+        if (projectorMode)
+            visualizerFullScreen = true;
+        resized();
+        repaint();
+    };
+
+    // ── Geiss control buttons ──
+    addAndMakeVisible(geissWaveBtn);
+    geissWaveBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissWaveform); return; }
+        geissDisplay.cycleWaveform();
+    };
+
+    addAndMakeVisible(geissPaletteBtn);
+    geissPaletteBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissPalette); return; }
+        geissDisplay.cyclePalette();
+    };
+
+    addAndMakeVisible(geissSceneBtn);
+    geissSceneBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissScene); return; }
+        geissDisplay.newRandomScene();
+    };
+
+    addAndMakeVisible(geissWaveUpBtn);
+    geissWaveUpBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissWaveScale); return; }
+        geissDisplay.waveScaleUp();
+    };
+
+    addAndMakeVisible(geissWaveDownBtn);
+    geissWaveDownBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissWaveScale); return; }
+        geissDisplay.waveScaleDown();
+    };
+
+    addAndMakeVisible(geissWarpLockBtn);
+    geissWarpLockBtn.setClickingTogglesState(true);
+    geissWarpLockBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissWarpLock); return; }
+        geissDisplay.toggleWarpLock();
+    };
+
+    addAndMakeVisible(geissPalLockBtn);
+    geissPalLockBtn.setClickingTogglesState(true);
+    geissPalLockBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GeissPaletteLock); return; }
+        geissDisplay.togglePaletteLock();
+    };
+
+    addAndMakeVisible(geissSpeedSelector);
+    geissSpeedSelector.addItem("0.25x", 1);
+    geissSpeedSelector.addItem("0.5x", 2);
+    geissSpeedSelector.addItem("1x", 3);
+    geissSpeedSelector.addItem("2x", 4);
+    geissSpeedSelector.addItem("4x", 5);
+    geissSpeedSelector.setSelectedId(3, juce::dontSendNotification);
+    geissSpeedSelector.onChange = [this] {
+        float speeds[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+        int idx = geissSpeedSelector.getSelectedId() - 1;
+        if (idx >= 0 && idx < 5) geissDisplay.setSpeed(speeds[idx]);
+    };
+
+    // ── G-Force control buttons ──
+    addAndMakeVisible(gfRibbonUpBtn);
+    gfRibbonUpBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GForceRibbons); return; }
+        gforceDisplay.moreRibbons();
+    };
+    addAndMakeVisible(gfRibbonDownBtn);
+    gfRibbonDownBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GForceRibbons); return; }
+        gforceDisplay.fewerRibbons();
+    };
+    addAndMakeVisible(gfTrailBtn);
+    gfTrailBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::GForceTrail); return; }
+        gforceDisplay.cycleTrail();
+    };
+    addAndMakeVisible(gfSpeedSelector);
+    gfSpeedSelector.addItem("0.25x", 1);
+    gfSpeedSelector.addItem("0.5x", 2);
+    gfSpeedSelector.addItem("1x", 3);
+    gfSpeedSelector.addItem("2x", 4);
+    gfSpeedSelector.addItem("4x", 5);
+    gfSpeedSelector.setSelectedId(3, juce::dontSendNotification);
+    gfSpeedSelector.onChange = [this] {
+        float speeds[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+        int idx = gfSpeedSelector.getSelectedId() - 1;
+        if (idx >= 0 && idx < 5) gforceDisplay.setSpeed(speeds[idx]);
+    };
+
+    // ── Spectrum control buttons ──
+    addAndMakeVisible(specDecayBtn);
+    specDecayBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::SpecDecay); return; }
+        spectrumDisplay.cycleDecay();
+    };
+    addAndMakeVisible(specSensUpBtn);
+    specSensUpBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::SpecSensitivity); return; }
+        spectrumDisplay.sensitivityUp();
+    };
+    addAndMakeVisible(specSensDownBtn);
+    specSensDownBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::SpecSensitivity); return; }
+        spectrumDisplay.sensitivityDown();
+    };
+
+    // ── Lissajous control buttons ──
+    addAndMakeVisible(lissZoomInBtn);
+    lissZoomInBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::LissZoom); return; }
+        lissajousDisplay.zoomIn();
+    };
+    addAndMakeVisible(lissZoomOutBtn);
+    lissZoomOutBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::LissZoom); return; }
+        lissajousDisplay.zoomOut();
+    };
+    addAndMakeVisible(lissDotsBtn);
+    lissDotsBtn.onClick = [this] {
+        if (midiLearnActive) { startMidiLearn(MidiTarget::LissDots); return; }
+        lissajousDisplay.cycleDots();
+    };
+
+    setVisControlsVisible();
 
     addAndMakeVisible(midi2Button);
     midi2Button.setClickingTogglesState(true);
@@ -550,7 +678,7 @@ MainComponent::~MainComponent()
 {
     pluginHost.spectrumDisplay = nullptr;
     pluginHost.gforceDisplay = nullptr;
-    pluginHost.milkdropDisplay = nullptr;
+    pluginHost.geissDisplay = nullptr;
     // Clear Lissajous pointer from all tracks
     for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
     {
@@ -1568,43 +1696,97 @@ void MainComponent::resized()
     // ── Fullscreen Visualizer Mode ──
     if (visualizerFullScreen)
     {
-        // Control bar at the top of the vis area
-        auto controlBar = area.removeFromTop(36).reduced(4, 2);
-        visExitButton.setBounds(controlBar.removeFromLeft(55));
-        visExitButton.setVisible(true);
-        controlBar.removeFromLeft(6);
-        visSelector.setBounds(controlBar.removeFromLeft(90));
-        visSelector.setVisible(true);
-        controlBar.removeFromLeft(6);
-        nextPresetButton.setBounds(controlBar.removeFromLeft(45));
-        nextPresetButton.setVisible(currentVisMode == 2);
-
-        auto visArea = area.reduced(2, 2);
-
-        // Hide all visualizers first
-        spectrumDisplay.setVisible(false);
-        lissajousDisplay.setVisible(false);
-        gforceDisplay.setVisible(false);
-        milkdropDisplay.setVisible(false);
-
-        if (currentVisMode == 0)  // Spectrum + Lissajous
+        if (projectorMode)
         {
-            auto topHalf = visArea.removeFromTop(visArea.getHeight() / 2);
-            visArea.removeFromTop(4);
-            spectrumDisplay.setBounds(topHalf);
-            lissajousDisplay.setBounds(visArea);
-            spectrumDisplay.setVisible(true);
-            lissajousDisplay.setVisible(true);
+            // Projector mode — zero UI chrome, just the visualizer
+            auto visArea = area;
+
+            spectrumDisplay.setVisible(false);
+            lissajousDisplay.setVisible(false);
+            gforceDisplay.setVisible(false);
+            geissDisplay.setVisible(false);
+            visExitButton.setVisible(false);
+            visSelector.setVisible(false);
+            setVisControlsVisible();
+            projectorButton.setVisible(false);
+
+            if (currentVisMode == 0) { spectrumDisplay.setBounds(visArea); spectrumDisplay.setAlpha(1.0f); spectrumDisplay.setVisible(true); }
+            else if (currentVisMode == 1) { lissajousDisplay.setBounds(visArea); lissajousDisplay.setVisible(true); }
+            else if (currentVisMode == 2) { gforceDisplay.setBounds(visArea); gforceDisplay.setVisible(true); }
+            else if (currentVisMode == 3) { geissDisplay.setBounds(visArea); geissDisplay.setVisible(true); }
         }
-        else if (currentVisMode == 1)  // G-Force
+        else
         {
-            gforceDisplay.setBounds(visArea);
-            gforceDisplay.setVisible(true);
-        }
-        else if (currentVisMode == 2)  // MilkDrop
-        {
-            milkdropDisplay.setBounds(visArea);
-            milkdropDisplay.setVisible(true);
+            // Fullscreen with control bar
+            auto controlBar = area.removeFromTop(36).reduced(4, 2);
+            visExitButton.setBounds(controlBar.removeFromLeft(55));
+            visExitButton.setVisible(true);
+            controlBar.removeFromLeft(6);
+            visSelector.setBounds(controlBar.removeFromLeft(90));
+            visSelector.setVisible(true);
+            controlBar.removeFromLeft(6);
+            projectorButton.setBounds(controlBar.removeFromLeft(50));
+            projectorButton.setVisible(true);
+
+            // Visualizer controls in fullscreen control bar
+            controlBar.removeFromLeft(10);
+            if (currentVisMode == 0) // Spectrum
+            {
+                specDecayBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                specSensDownBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(2);
+                specSensUpBtn.setBounds(controlBar.removeFromLeft(30));
+            }
+            else if (currentVisMode == 1) // Lissajous
+            {
+                lissZoomOutBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(2);
+                lissZoomInBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(3);
+                lissDotsBtn.setBounds(controlBar.removeFromLeft(50));
+            }
+            else if (currentVisMode == 2) // G-Force
+            {
+                gfRibbonDownBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(2);
+                gfRibbonUpBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(3);
+                gfTrailBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                gfSpeedSelector.setBounds(controlBar.removeFromLeft(60));
+            }
+            else if (currentVisMode == 3) // Geiss
+            {
+                geissWaveBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                geissPaletteBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                geissSceneBtn.setBounds(controlBar.removeFromLeft(55));
+                controlBar.removeFromLeft(3);
+                geissWaveDownBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(2);
+                geissWaveUpBtn.setBounds(controlBar.removeFromLeft(30));
+                controlBar.removeFromLeft(3);
+                geissWarpLockBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                geissPalLockBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                geissSpeedSelector.setBounds(controlBar.removeFromLeft(60));
+            }
+            setVisControlsVisible();
+
+            auto visArea = area.reduced(2, 2);
+
+            spectrumDisplay.setVisible(false);
+            lissajousDisplay.setVisible(false);
+            gforceDisplay.setVisible(false);
+            geissDisplay.setVisible(false);
+
+            if (currentVisMode == 0) { spectrumDisplay.setBounds(visArea); spectrumDisplay.setAlpha(1.0f); spectrumDisplay.setVisible(true); }
+            else if (currentVisMode == 1) { lissajousDisplay.setBounds(visArea); lissajousDisplay.setVisible(true); }
+            else if (currentVisMode == 2) { gforceDisplay.setBounds(visArea); gforceDisplay.setVisible(true); }
+            else if (currentVisMode == 3) { geissDisplay.setBounds(visArea); geissDisplay.setVisible(true); }
         }
 
         // Hide everything else
@@ -1678,12 +1860,13 @@ void MainComponent::resized()
     panSlider.setVisible(true);
     panLabel.setVisible(true);
     if (timelineComponent) timelineComponent->setVisible(true);
-    spectrumDisplay.setVisible(true);
-    lissajousDisplay.setVisible(true);
-    gforceDisplay.setVisible(false);
-    milkdropDisplay.setVisible(false);
-    nextPresetButton.setVisible(false);
+    spectrumDisplay.setVisible(currentVisMode == 0);
+    lissajousDisplay.setVisible(currentVisMode == 1);
+    gforceDisplay.setVisible(currentVisMode == 2);
+    geissDisplay.setVisible(currentVisMode == 3);
     visExitButton.setVisible(false);
+    projectorButton.setVisible(false);
+    setVisControlsVisible();
 
     // ── Edit Toolbar ──
     auto toolbar = area.removeFromTop(50).reduced(4, 4);
@@ -1715,6 +1898,9 @@ void MainComponent::resized()
     toolbar.removeFromLeft(3);
     fullscreenButton.setBounds(toolbar.removeFromLeft(36));
     toolbar.removeFromLeft(3);
+    projectorButton.setBounds(toolbar.removeFromLeft(45));
+    projectorButton.setVisible(true);
+    toolbar.removeFromLeft(3);
     visSelector.setBounds(toolbar.removeFromLeft(80));
     toolbar.removeFromLeft(3);
     midi2Button.setBounds(toolbar.removeFromLeft(44));
@@ -1722,9 +1908,86 @@ void MainComponent::resized()
     // ── Right Panel ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
 
-    // Spectrum analyzer + Lissajous stacked at top
-    lissajousDisplay.setBounds(rightPanel.removeFromTop(100));
+    // Visualizer display at top of right panel — shows selected mode
+    auto visPanelArea = rightPanel.removeFromTop(100);
+    if (currentVisMode == 0)  // Spectrum
+    {
+        spectrumDisplay.setBounds(visPanelArea);
+        spectrumDisplay.setAlpha(1.0f);
+        spectrumDisplay.setVisible(true);
+    }
+    else if (currentVisMode == 1)  // Lissajous
+    {
+        lissajousDisplay.setBounds(visPanelArea);
+        lissajousDisplay.setVisible(true);
+    }
+    else if (currentVisMode == 2)  // G-Force
+    {
+        gforceDisplay.setBounds(visPanelArea);
+        gforceDisplay.setVisible(true);
+    }
+    else if (currentVisMode == 3)  // Geiss
+    {
+        geissDisplay.setBounds(visPanelArea);
+        geissDisplay.setVisible(true);
+    }
     rightPanel.removeFromTop(4);
+
+    // Visualizer controls below the vis panel
+    if (currentVisMode == 0) // Spectrum
+    {
+        auto row = rightPanel.removeFromTop(28);
+        specDecayBtn.setBounds(row.removeFromLeft(50));
+        row.removeFromLeft(3);
+        specSensDownBtn.setBounds(row.removeFromLeft(28));
+        row.removeFromLeft(2);
+        specSensUpBtn.setBounds(row.removeFromLeft(28));
+        rightPanel.removeFromTop(4);
+    }
+    else if (currentVisMode == 1) // Lissajous
+    {
+        auto row = rightPanel.removeFromTop(28);
+        lissZoomOutBtn.setBounds(row.removeFromLeft(28));
+        row.removeFromLeft(2);
+        lissZoomInBtn.setBounds(row.removeFromLeft(28));
+        row.removeFromLeft(3);
+        lissDotsBtn.setBounds(row.removeFromLeft(50));
+        rightPanel.removeFromTop(4);
+    }
+    else if (currentVisMode == 2) // G-Force
+    {
+        auto row = rightPanel.removeFromTop(28);
+        gfRibbonDownBtn.setBounds(row.removeFromLeft(28));
+        row.removeFromLeft(2);
+        gfRibbonUpBtn.setBounds(row.removeFromLeft(28));
+        row.removeFromLeft(3);
+        gfTrailBtn.setBounds(row.removeFromLeft(50));
+        row.removeFromLeft(3);
+        gfSpeedSelector.setBounds(row.removeFromLeft(55));
+        rightPanel.removeFromTop(4);
+    }
+    else if (currentVisMode == 3) // Geiss
+    {
+        auto geissRow1 = rightPanel.removeFromTop(28);
+        geissWaveBtn.setBounds(geissRow1.removeFromLeft(50));
+        geissRow1.removeFromLeft(3);
+        geissPaletteBtn.setBounds(geissRow1.removeFromLeft(50));
+        geissRow1.removeFromLeft(3);
+        geissSceneBtn.setBounds(geissRow1.removeFromLeft(55));
+        geissRow1.removeFromLeft(3);
+        geissWaveDownBtn.setBounds(geissRow1.removeFromLeft(28));
+        geissRow1.removeFromLeft(2);
+        geissWaveUpBtn.setBounds(geissRow1.removeFromLeft(28));
+        rightPanel.removeFromTop(3);
+        auto geissRow2 = rightPanel.removeFromTop(28);
+        geissWarpLockBtn.setBounds(geissRow2.removeFromLeft(50));
+        geissRow2.removeFromLeft(3);
+        geissPalLockBtn.setBounds(geissRow2.removeFromLeft(50));
+        geissRow2.removeFromLeft(3);
+        geissSpeedSelector.setBounds(geissRow2.removeFromLeft(60));
+        rightPanel.removeFromTop(4);
+    }
+    setVisControlsVisible();
 
     pluginSelector.setBounds(rightPanel.removeFromTop(36));
     rightPanel.removeFromTop(4);
@@ -1767,10 +2030,18 @@ void MainComponent::resized()
         }
     }
 
-    // Spectrum ghosted behind volume/pan area
-    spectrumDisplay.setBounds(rightPanel);
-    spectrumDisplay.setAlpha(0.3f);
-    spectrumDisplay.toBack();
+    // Spectrum ghosted behind volume/pan area (only when not the active visualizer)
+    if (currentVisMode != 0)
+    {
+        spectrumDisplay.setBounds(rightPanel);
+        spectrumDisplay.setAlpha(0.3f);
+        spectrumDisplay.setVisible(true);
+        spectrumDisplay.toBack();
+    }
+    else
+    {
+        spectrumDisplay.setAlpha(1.0f);
+    }
 
     // Volume/Pan — fills remaining space (on top of spectrum)
     auto mixArea = rightPanel;
@@ -1901,6 +2172,35 @@ bool MainComponent::keyStateChanged(bool /*isKeyDown*/)
         else if (!isDown && wasDown) { keysCurrentlyDown.erase(keyCode); sendNoteOff(midiNote); }
     }
     return true;
+}
+
+void MainComponent::setVisControlsVisible()
+{
+    bool geiss = (currentVisMode == 3);
+    geissWaveBtn.setVisible(geiss);
+    geissPaletteBtn.setVisible(geiss);
+    geissSceneBtn.setVisible(geiss);
+    geissWaveUpBtn.setVisible(geiss);
+    geissWaveDownBtn.setVisible(geiss);
+    geissWarpLockBtn.setVisible(geiss);
+    geissPalLockBtn.setVisible(geiss);
+    geissSpeedSelector.setVisible(geiss);
+
+    bool gf = (currentVisMode == 2);
+    gfRibbonUpBtn.setVisible(gf);
+    gfRibbonDownBtn.setVisible(gf);
+    gfTrailBtn.setVisible(gf);
+    gfSpeedSelector.setVisible(gf);
+
+    bool spec = (currentVisMode == 0);
+    specDecayBtn.setVisible(spec);
+    specSensUpBtn.setVisible(spec);
+    specSensDownBtn.setVisible(spec);
+
+    bool liss = (currentVisMode == 1);
+    lissZoomInBtn.setVisible(liss);
+    lissZoomOutBtn.setVisible(liss);
+    lissDotsBtn.setVisible(liss);
 }
 
 void MainComponent::applyThemeToControls()
@@ -2066,6 +2366,20 @@ void MainComponent::startMidiLearn(MidiTarget target)
         case MidiTarget::Param3: case MidiTarget::Param4: case MidiTarget::Param5:
             targetName = "Param " + juce::String(static_cast<int>(target) - static_cast<int>(MidiTarget::Param0) + 1);
             break;
+        case MidiTarget::GeissWaveform:   targetName = "Geiss Wave"; break;
+        case MidiTarget::GeissPalette:    targetName = "Geiss Palette"; break;
+        case MidiTarget::GeissScene:      targetName = "Geiss Scene"; break;
+        case MidiTarget::GeissWaveScale:  targetName = "Geiss Wave Scale"; break;
+        case MidiTarget::GeissWarpLock:   targetName = "Geiss Warp Lock"; break;
+        case MidiTarget::GeissPaletteLock:targetName = "Geiss Palette Lock"; break;
+        case MidiTarget::GeissSpeed:      targetName = "Geiss Speed"; break;
+        case MidiTarget::GForceRibbons:   targetName = "GF Ribbons"; break;
+        case MidiTarget::GForceTrail:     targetName = "GF Trail"; break;
+        case MidiTarget::GForceSpeed:     targetName = "GF Speed"; break;
+        case MidiTarget::SpecDecay:       targetName = "Spec Decay"; break;
+        case MidiTarget::SpecSensitivity: targetName = "Spec Sensitivity"; break;
+        case MidiTarget::LissZoom:        targetName = "Liss Zoom"; break;
+        case MidiTarget::LissDots:        targetName = "Liss Dots"; break;
         default: targetName = "?"; break;
     }
 
@@ -2149,6 +2463,48 @@ void MainComponent::applyMidiCC(const MidiMapping& mapping, int value)
                 paramSliders[idx]->setValue(norm, juce::sendNotification);
             break;
         }
+        case MidiTarget::GeissWaveform:
+            if (value > 0) geissDisplay.cycleWaveform();
+            break;
+        case MidiTarget::GeissPalette:
+            if (value > 0) geissDisplay.setPaletteStyle(value % GeissComponent::NUM_PALETTE_STYLES);
+            break;
+        case MidiTarget::GeissScene:
+            if (value > 0) geissDisplay.newRandomScene();
+            break;
+        case MidiTarget::GeissWaveScale:
+            geissDisplay.setWaveScale(norm * 3.0f);
+            break;
+        case MidiTarget::GeissWarpLock:
+            if (value > 0) geissDisplay.toggleWarpLock();
+            break;
+        case MidiTarget::GeissPaletteLock:
+            if (value > 0) geissDisplay.togglePaletteLock();
+            break;
+        case MidiTarget::GeissSpeed:
+            geissDisplay.setSpeed(0.25f + norm * 3.75f);
+            break;
+        case MidiTarget::GForceRibbons:
+            gforceDisplay.setRibbonCount(1 + static_cast<int>(norm * 7.0f));
+            break;
+        case MidiTarget::GForceTrail:
+            gforceDisplay.setTrailIntensity(norm);
+            break;
+        case MidiTarget::GForceSpeed:
+            gforceDisplay.setSpeed(0.25f + norm * 3.75f);
+            break;
+        case MidiTarget::SpecDecay:
+            spectrumDisplay.setDecaySpeed(0.5f + norm * 0.49f);
+            break;
+        case MidiTarget::SpecSensitivity:
+            spectrumDisplay.setSensitivity(0.1f + norm * 1.9f);
+            break;
+        case MidiTarget::LissZoom:
+            lissajousDisplay.setZoom(0.5f + norm * 9.5f);
+            break;
+        case MidiTarget::LissDots:
+            lissajousDisplay.setDotCount(64 + static_cast<int>(norm * 960.0f));
+            break;
         default: break;
     }
 }

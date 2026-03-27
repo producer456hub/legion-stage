@@ -19,6 +19,22 @@ public:
 
     ~LissajousComponent() override { stopTimer(); }
 
+    // ── Public controls ──
+    void setZoom(float z) { zoom = juce::jlimit(0.5f, 10.0f, z); }
+    float getZoom() const { return zoom; }
+    void zoomIn()  { setZoom(zoom * 1.3f); }
+    void zoomOut() { setZoom(zoom / 1.3f); }
+
+    void setDotCount(int n) { dotCount = juce::jlimit(64, 1024, n); }
+    int getDotCount() const { return dotCount; }
+    void cycleDots()
+    {
+        if (dotCount <= 128) dotCount = 256;
+        else if (dotCount <= 384) dotCount = 512;
+        else if (dotCount <= 768) dotCount = 1024;
+        else dotCount = 64;
+    }
+
     // Called from audio thread — push stereo sample pairs
     void pushSamples(const float* L, const float* R, int numSamples)
     {
@@ -58,7 +74,7 @@ public:
 
         float cx = plotArea.getCentreX();
         float cy = plotArea.getCentreY();
-        float scale = juce::jmin(plotArea.getWidth(), plotArea.getHeight()) * 3.0f;
+        float scale = juce::jmin(plotArea.getWidth(), plotArea.getHeight()) * zoom;
 
         // Value markers on sides
         auto labelColor = juce::Colour(dotColor).withAlpha(0.35f);
@@ -152,7 +168,7 @@ public:
         }
 
         // Draw recent points as bright dots
-        int brightCount = juce::jmin(256, trailLength);
+        int brightCount = juce::jmin(dotCount, trailLength);
         int brightStart = (writePos - brightCount + bufferSize) % bufferSize;
 
         for (int i = 0; i < brightCount; ++i)
@@ -177,6 +193,10 @@ private:
     float bufR[bufferSize] = {};
     int writePos = 0;
     std::atomic<bool> dataReady { false };
+
+    // Controllable parameters
+    float zoom = 3.0f;        // 0.5-10.0 scale factor
+    int dotCount = 256;        // 64-1024 bright dot count
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LissajousComponent)
 };

@@ -10,7 +10,7 @@
 class SpectrumComponent;
 class LissajousComponent;
 class GForceComponent;
-class MilkDropComponent;
+class GeissComponent;
 
 struct FxSlot {
     juce::AudioProcessorGraph::Node::Ptr node;
@@ -74,7 +74,7 @@ public:
     // Spectrum analyzer — set from UI, read from audio thread
     SpectrumComponent* spectrumDisplay = nullptr;
     GForceComponent* gforceDisplay = nullptr;
-    MilkDropComponent* milkdropDisplay = nullptr;
+    GeissComponent* geissDisplay = nullptr;
 
 private:
     juce::AudioPluginFormatManager formatManager;

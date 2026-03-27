@@ -21,6 +21,29 @@ public:
 
     ~GForceComponent() override { stopTimer(); }
 
+    // ── Public controls ──
+    void setRibbonCount(int n) { ribbonCount = juce::jlimit(1, 8, n); }
+    int getRibbonCount() const { return ribbonCount; }
+    void moreRibbons() { setRibbonCount(ribbonCount + 1); }
+    void fewerRibbons() { setRibbonCount(ribbonCount - 1); }
+
+    void setSpeed(float s) { speedMult = juce::jlimit(0.25f, 4.0f, s); }
+    float getSpeed() const { return speedMult; }
+
+    void setColorSpeed(float s) { colorSpeedMult = juce::jlimit(0.0f, 4.0f, s); }
+    float getColorSpeed() const { return colorSpeedMult; }
+
+    void setTrailIntensity(float t) { trailAlpha = juce::jlimit(0x02, 0x30, static_cast<int>(t * 48.0f)); }
+    float getTrailIntensity() const { return static_cast<float>(trailAlpha) / 48.0f; }
+
+    void cycleTrail()
+    {
+        // Cycle between light, medium, heavy trails
+        if (trailAlpha <= 0x06) trailAlpha = 0x0D;
+        else if (trailAlpha <= 0x10) trailAlpha = 0x20;
+        else trailAlpha = 0x04;
+    }
+
     void pushSamples(const float* data, int numSamples)
     {
         // Copy waveform into ring buffer
@@ -40,9 +63,10 @@ public:
 
     void timerCallback() override
     {
-        phase += 0.015;
-        colorPhase += 0.003;
-        morphPhase += 0.008;
+        double spd = static_cast<double>(speedMult);
+        phase += 0.015 * spd;
+        colorPhase += 0.003 * static_cast<double>(colorSpeedMult);
+        morphPhase += 0.008 * spd;
         repaint();
     }
 
@@ -53,7 +77,7 @@ public:
         float h = bounds.getHeight();
 
         // Trail effect: semi-transparent dark overlay instead of full clear
-        g.setColour(juce::Colour(0x0D000008));
+        g.setColour(juce::Colour(static_cast<uint32_t>((trailAlpha << 24) | 0x000008)));
         g.fillRect(bounds);
 
         // If this is the first paint or size changed, do full clear
@@ -75,7 +99,7 @@ public:
             wave[i] = waveBuffer[(rp + i) % WAVE_SIZE];
 
         // Draw multiple morphing ribbons
-        for (int r = 0; r < NUM_RIBBONS; ++r)
+        for (int r = 0; r < ribbonCount; ++r)
         {
             float ribbonPhase = static_cast<float>(phase) + r * 1.257f;
             float morphOffset = static_cast<float>(morphPhase) + r * 0.7f;
@@ -159,6 +183,12 @@ private:
     double morphPhase = 0.0;
     std::atomic<float> smoothedRms { 0.0f };
     float lastW = 0, lastH = 0;
+
+    // Controllable parameters
+    int ribbonCount = NUM_RIBBONS;   // 1-8
+    float speedMult = 1.0f;          // 0.25-4.0
+    float colorSpeedMult = 1.0f;     // 0.0-4.0
+    int trailAlpha = 0x0D;           // trail overlay opacity
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GForceComponent)
 };

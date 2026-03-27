@@ -2,7 +2,7 @@
 #include "SpectrumComponent.h"
 #include "LissajousComponent.h"
 #include "GForceComponent.h"
-#include "MilkDropComponent.h"
+#include "GeissComponent.h"
 
 PluginHost::PluginHost()
 {
@@ -454,8 +454,8 @@ void PluginHost::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer
 
         if (gforceDisplay != nullptr)
             gforceDisplay->pushSamples(mono, count);
-        if (milkdropDisplay != nullptr)
-            milkdropDisplay->pushSamples(mono, count);
+        if (geissDisplay != nullptr)
+            geissDisplay->pushSamples(mono, count);
     }
 
 }

@@ -10,7 +10,7 @@
 #include "SpectrumComponent.h"
 #include "LissajousComponent.h"
 #include "GForceComponent.h"
-#include "MilkDropComponent.h"
+#include "GeissComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -50,7 +50,7 @@ private:
     SpectrumComponent spectrumDisplay;
     LissajousComponent lissajousDisplay;
     GForceComponent gforceDisplay;
-    MilkDropComponent milkdropDisplay;
+    GeissComponent geissDisplay;
     juce::AudioDeviceManager deviceManager;
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;
@@ -100,10 +100,37 @@ private:
     juce::TextButton fullscreenButton { "VIS" };
     juce::ComboBox visSelector;
     bool visualizerFullScreen = false;
-    int currentVisMode = 0;  // 0=Spectrum+Lissajous, 1=G-Force, 2=MilkDrop
-    juce::TextButton nextPresetButton { ">>|" };
+    int currentVisMode = 0;  // 0=Spectrum, 1=Lissajous, 2=G-Force, 3=Geiss
     juce::TextButton visExitButton { "EXIT" };
+    juce::TextButton projectorButton { "PROJ" };
+    bool projectorMode = false;
     juce::TextButton testNoteButton { "Test Note" };
+
+    // ── Visualizer Controls ──
+    // Geiss
+    juce::TextButton geissWaveBtn { "Wave" };
+    juce::TextButton geissPaletteBtn { "Color" };
+    juce::TextButton geissSceneBtn { "Scene" };
+    juce::TextButton geissWaveUpBtn { "W+" };
+    juce::TextButton geissWaveDownBtn { "W-" };
+    juce::TextButton geissWarpLockBtn { "Warp" };
+    juce::TextButton geissPalLockBtn { "PLock" };
+    juce::ComboBox geissSpeedSelector;
+    // G-Force
+    juce::TextButton gfRibbonUpBtn { "R+" };
+    juce::TextButton gfRibbonDownBtn { "R-" };
+    juce::TextButton gfTrailBtn { "Trail" };
+    juce::ComboBox gfSpeedSelector;
+    // Spectrum
+    juce::TextButton specDecayBtn { "Decay" };
+    juce::TextButton specSensUpBtn { "S+" };
+    juce::TextButton specSensDownBtn { "S-" };
+    // Lissajous
+    juce::TextButton lissZoomInBtn { "Z+" };
+    juce::TextButton lissZoomOutBtn { "Z-" };
+    juce::TextButton lissDotsBtn { "Dots" };
+
+    void setVisControlsVisible();
 
     // MidiInputCallback — intercept SysEx for CI before it goes to collector
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& msg) override;
@@ -208,7 +235,12 @@ private:
         None, Volume, Pan, Bpm,
         Play, Stop, Record, Metronome, Loop,
         Param0, Param1, Param2, Param3, Param4, Param5,
-        TrackNext, TrackPrev
+        TrackNext, TrackPrev,
+        GeissWaveform, GeissPalette, GeissScene,
+        GeissWaveScale, GeissWarpLock, GeissPaletteLock, GeissSpeed,
+        GForceRibbons, GForceTrail, GForceSpeed,
+        SpecDecay, SpecSensitivity,
+        LissZoom, LissDots
     };
 
     struct MidiMapping {

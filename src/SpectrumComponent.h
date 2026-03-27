@@ -20,6 +20,23 @@ public:
 
     ~SpectrumComponent() override { stopTimer(); }
 
+    // ── Public controls ──
+    void setDecaySpeed(float d) { decaySpeed = juce::jlimit(0.5f, 0.99f, d); }
+    float getDecaySpeed() const { return decaySpeed; }
+    void cycleDecay()
+    {
+        // Cycle: fast → medium → slow → very slow
+        if (decaySpeed < 0.75f) decaySpeed = 0.85f;
+        else if (decaySpeed < 0.90f) decaySpeed = 0.93f;
+        else if (decaySpeed < 0.96f) decaySpeed = 0.98f;
+        else decaySpeed = 0.65f;
+    }
+
+    void setSensitivity(float s) { sensitivity = juce::jlimit(0.1f, 2.0f, s); }
+    float getSensitivity() const { return sensitivity; }
+    void sensitivityUp()   { setSensitivity(sensitivity + 0.2f); }
+    void sensitivityDown() { setSensitivity(sensitivity - 0.2f); }
+
     // Called from audio thread — push mono samples into ring buffer
     void pushSamples(const float* data, int numSamples)
     {
@@ -69,10 +86,10 @@ public:
 
                 // Convert to dB-ish scale
                 float level = juce::jlimit(0.0f, 1.0f,
-                    (std::log10(1.0f + sum * 10.0f)) * 0.5f);
+                    (std::log10(1.0f + sum * 10.0f * sensitivity)) * 0.5f);
 
                 // Smooth falloff
-                barLevels[bar] = juce::jmax(level, barLevels[bar] * 0.85f);
+                barLevels[bar] = juce::jmax(level, barLevels[bar] * decaySpeed);
             }
 
             repaint();
@@ -121,6 +138,10 @@ private:
     std::atomic<bool> fftDataReady { false };
 
     float barLevels[numBars] = {};
+
+    // Controllable parameters
+    float decaySpeed = 0.85f;     // 0.5-0.99 bar falloff rate
+    float sensitivity = 1.0f;    // 0.1-2.0 input gain
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SpectrumComponent)
 };
