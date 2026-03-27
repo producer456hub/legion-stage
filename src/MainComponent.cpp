@@ -16,6 +16,20 @@ MainComponent::MainComponent()
 
     addAndMakeVisible(lissajousDisplay);
 
+    addAndMakeVisible(gforceDisplay);
+    gforceDisplay.setVisible(false);
+    pluginHost.gforceDisplay = &gforceDisplay;
+
+    addAndMakeVisible(milkdropDisplay);
+    milkdropDisplay.setVisible(false);
+    // Try common preset locations
+    juce::File presetDir("C:/Program Files/Legion Stage/milkdrop-presets");
+    if (!presetDir.isDirectory())
+        presetDir = juce::File::getSpecialLocation(juce::File::currentApplicationFile)
+            .getParentDirectory().getChildFile("milkdrop-presets");
+    milkdropDisplay.setPresetPath(presetDir.getFullPathName());
+    pluginHost.milkdropDisplay = &milkdropDisplay;
+
     if (auto* device = deviceManager.getCurrentAudioDevice())
     {
         pluginHost.setAudioParams(device->getCurrentSampleRate(),
@@ -265,6 +279,37 @@ MainComponent::MainComponent()
     addAndMakeVisible(audioSettingsButton);
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
 
+    addAndMakeVisible(fullscreenButton);
+    fullscreenButton.setClickingTogglesState(true);
+    fullscreenButton.onClick = [this] {
+        visualizerFullScreen = fullscreenButton.getToggleState();
+        resized();
+        repaint();
+    };
+
+    addAndMakeVisible(visSelector);
+    visSelector.addItem("Spectrum", 1);
+    visSelector.addItem("G-Force", 2);
+    visSelector.addItem("MilkDrop", 3);
+    visSelector.setSelectedId(1, juce::dontSendNotification);
+    visSelector.onChange = [this] {
+        currentVisMode = visSelector.getSelectedId() - 1;
+        if (visualizerFullScreen) { resized(); repaint(); }
+    };
+
+    addAndMakeVisible(nextPresetButton);
+    nextPresetButton.onClick = [this] { milkdropDisplay.nextPreset(); };
+
+    addAndMakeVisible(visExitButton);
+    visExitButton.setVisible(false);
+    visExitButton.onClick = [this] {
+        visualizerFullScreen = false;
+        fullscreenButton.setToggleState(false, juce::dontSendNotification);
+        resized();
+        repaint();
+        grabKeyboardFocus();
+    };
+
     addAndMakeVisible(midi2Button);
     midi2Button.setClickingTogglesState(true);
     midi2Button.onClick = [this] {
@@ -504,6 +549,8 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     pluginHost.spectrumDisplay = nullptr;
+    pluginHost.gforceDisplay = nullptr;
+    pluginHost.milkdropDisplay = nullptr;
     // Clear Lissajous pointer from all tracks
     for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
     {
@@ -1518,6 +1565,126 @@ void MainComponent::resized()
     topBar.removeFromRight(2);
     bpmDownButton.setBounds(topBar.removeFromRight(44));
 
+    // ── Fullscreen Visualizer Mode ──
+    if (visualizerFullScreen)
+    {
+        // Control bar at the top of the vis area
+        auto controlBar = area.removeFromTop(36).reduced(4, 2);
+        visExitButton.setBounds(controlBar.removeFromLeft(55));
+        visExitButton.setVisible(true);
+        controlBar.removeFromLeft(6);
+        visSelector.setBounds(controlBar.removeFromLeft(90));
+        visSelector.setVisible(true);
+        controlBar.removeFromLeft(6);
+        nextPresetButton.setBounds(controlBar.removeFromLeft(45));
+        nextPresetButton.setVisible(currentVisMode == 2);
+
+        auto visArea = area.reduced(2, 2);
+
+        // Hide all visualizers first
+        spectrumDisplay.setVisible(false);
+        lissajousDisplay.setVisible(false);
+        gforceDisplay.setVisible(false);
+        milkdropDisplay.setVisible(false);
+
+        if (currentVisMode == 0)  // Spectrum + Lissajous
+        {
+            auto topHalf = visArea.removeFromTop(visArea.getHeight() / 2);
+            visArea.removeFromTop(4);
+            spectrumDisplay.setBounds(topHalf);
+            lissajousDisplay.setBounds(visArea);
+            spectrumDisplay.setVisible(true);
+            lissajousDisplay.setVisible(true);
+        }
+        else if (currentVisMode == 1)  // G-Force
+        {
+            gforceDisplay.setBounds(visArea);
+            gforceDisplay.setVisible(true);
+        }
+        else if (currentVisMode == 2)  // MilkDrop
+        {
+            milkdropDisplay.setBounds(visArea);
+            milkdropDisplay.setVisible(true);
+        }
+
+        // Hide everything else
+        newClipButton.setVisible(false);
+        deleteClipButton.setVisible(false);
+        duplicateClipButton.setVisible(false);
+        splitClipButton.setVisible(false);
+        editClipButton.setVisible(false);
+        quantizeButton.setVisible(false);
+        gridSelector.setVisible(false);
+        saveButton.setVisible(false);
+        loadButton.setVisible(false);
+        undoButton.setVisible(false);
+        redoButton.setVisible(false);
+        themeSelector.setVisible(false);
+        audioSettingsButton.setVisible(false);
+        midi2Button.setVisible(false);
+        pluginSelector.setVisible(false);
+        openEditorButton.setVisible(false);
+        midiInputSelector.setVisible(false);
+        midiRefreshButton.setVisible(false);
+        for (int i = 0; i < NUM_FX_SLOTS; ++i)
+        {
+            fxSelectors[i]->setVisible(false);
+            fxEditorButtons[i]->setVisible(false);
+        }
+        for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
+        {
+            paramSliders[i]->setVisible(false);
+            paramLabels[i]->setVisible(false);
+        }
+        volumeSlider.setVisible(false);
+        volumeLabel.setVisible(false);
+        panSlider.setVisible(false);
+        panLabel.setVisible(false);
+        if (timelineComponent) timelineComponent->setVisible(false);
+        return;
+    }
+
+    // ── Restore visibility when not in vis mode ──
+    newClipButton.setVisible(true);
+    deleteClipButton.setVisible(true);
+    duplicateClipButton.setVisible(true);
+    splitClipButton.setVisible(true);
+    editClipButton.setVisible(true);
+    quantizeButton.setVisible(true);
+    gridSelector.setVisible(true);
+    saveButton.setVisible(true);
+    loadButton.setVisible(true);
+    undoButton.setVisible(true);
+    redoButton.setVisible(true);
+    themeSelector.setVisible(true);
+    audioSettingsButton.setVisible(true);
+    midi2Button.setVisible(true);
+    pluginSelector.setVisible(true);
+    openEditorButton.setVisible(true);
+    midiInputSelector.setVisible(true);
+    midiRefreshButton.setVisible(true);
+    for (int i = 0; i < NUM_FX_SLOTS; ++i)
+    {
+        fxSelectors[i]->setVisible(true);
+        fxEditorButtons[i]->setVisible(true);
+    }
+    for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
+    {
+        paramSliders[i]->setVisible(true);
+        paramLabels[i]->setVisible(true);
+    }
+    volumeSlider.setVisible(true);
+    volumeLabel.setVisible(true);
+    panSlider.setVisible(true);
+    panLabel.setVisible(true);
+    if (timelineComponent) timelineComponent->setVisible(true);
+    spectrumDisplay.setVisible(true);
+    lissajousDisplay.setVisible(true);
+    gforceDisplay.setVisible(false);
+    milkdropDisplay.setVisible(false);
+    nextPresetButton.setVisible(false);
+    visExitButton.setVisible(false);
+
     // ── Edit Toolbar ──
     auto toolbar = area.removeFromTop(50).reduced(4, 4);
     newClipButton.setBounds(toolbar.removeFromLeft(95));
@@ -1546,10 +1713,11 @@ void MainComponent::resized()
     toolbar.removeFromLeft(3);
     audioSettingsButton.setBounds(toolbar.removeFromLeft(105));
     toolbar.removeFromLeft(3);
+    fullscreenButton.setBounds(toolbar.removeFromLeft(36));
+    toolbar.removeFromLeft(3);
+    visSelector.setBounds(toolbar.removeFromLeft(80));
+    toolbar.removeFromLeft(3);
     midi2Button.setBounds(toolbar.removeFromLeft(44));
-    toolbar.removeFromLeft(4);
-    if (toolbar.getWidth() > 20)
-        spectrumDisplay.setBounds(toolbar);
 
     // ── Right Panel ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
@@ -1599,7 +1767,12 @@ void MainComponent::resized()
         }
     }
 
-    // Volume/Pan — fills remaining space
+    // Spectrum ghosted behind volume/pan area
+    spectrumDisplay.setBounds(rightPanel);
+    spectrumDisplay.setAlpha(0.3f);
+    spectrumDisplay.toBack();
+
+    // Volume/Pan — fills remaining space (on top of spectrum)
     auto mixArea = rightPanel;
     auto volArea = mixArea.removeFromLeft(mixArea.getWidth() / 2);
     auto panArea = mixArea;
@@ -1646,6 +1819,17 @@ void MainComponent::sendNoteOff(int note)
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
+    // ESC = exit fullscreen visualizer
+    if (key == juce::KeyPress::escapeKey && visualizerFullScreen)
+    {
+        visualizerFullScreen = false;
+        fullscreenButton.setToggleState(false, juce::dontSendNotification);
+        resized();
+        repaint();
+        grabKeyboardFocus();
+        return true;
+    }
+
     // Spacebar = play/stop
     if (key == juce::KeyPress::spaceKey)
     {

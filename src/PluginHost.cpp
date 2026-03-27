@@ -1,6 +1,8 @@
 #include "PluginHost.h"
 #include "SpectrumComponent.h"
 #include "LissajousComponent.h"
+#include "GForceComponent.h"
+#include "MilkDropComponent.h"
 
 PluginHost::PluginHost()
 {
@@ -449,6 +451,11 @@ void PluginHost::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer
             mono[i] = (L[i] + R[i]) * 0.5f;
 
         spectrumDisplay->pushSamples(mono, count);
+
+        if (gforceDisplay != nullptr)
+            gforceDisplay->pushSamples(mono, count);
+        if (milkdropDisplay != nullptr)
+            milkdropDisplay->pushSamples(mono, count);
     }
 
 }

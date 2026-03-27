@@ -9,6 +9,8 @@
 #include "ThemeManager.h"
 #include "SpectrumComponent.h"
 #include "LissajousComponent.h"
+#include "GForceComponent.h"
+#include "MilkDropComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -47,6 +49,8 @@ private:
     juce::ComboBox themeSelector;
     SpectrumComponent spectrumDisplay;
     LissajousComponent lissajousDisplay;
+    GForceComponent gforceDisplay;
+    MilkDropComponent milkdropDisplay;
     juce::AudioDeviceManager deviceManager;
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;
@@ -93,6 +97,12 @@ private:
     juce::ComboBox midiInputSelector;
     juce::TextButton midiRefreshButton { "Refresh" };
     juce::TextButton audioSettingsButton { "Audio Settings" };
+    juce::TextButton fullscreenButton { "VIS" };
+    juce::ComboBox visSelector;
+    bool visualizerFullScreen = false;
+    int currentVisMode = 0;  // 0=Spectrum+Lissajous, 1=G-Force, 2=MilkDrop
+    juce::TextButton nextPresetButton { ">>|" };
+    juce::TextButton visExitButton { "EXIT" };
     juce::TextButton testNoteButton { "Test Note" };
 
     // MidiInputCallback — intercept SysEx for CI before it goes to collector

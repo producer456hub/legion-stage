@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6C2BD9;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#4F46E5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2563EB;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="waveGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#A78BFA;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#60A5FA;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#C084FC;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#38BDF8;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#0F0F1A"/>
+  <circle cx="256" cy="256" r="236" fill="none" stroke="url(#accentGrad)" stroke-width="1.5" opacity="0.4"/>
+
+  <!-- Shield shape -->
+  <path d="M256 68 L400 130 L400 280 Q400 370 256 448 Q112 370 112 280 L112 130 Z"
+        fill="url(#shieldGrad)" opacity="0.85" filter="url(#shadow)"/>
+
+  <!-- Shield inner border -->
+  <path d="M256 82 L390 140 L390 278 Q390 360 256 434 Q122 360 122 278 L122 140 Z"
+        fill="none" stroke="url(#accentGrad)" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Audio waveform bars (center of shield) -->
+  <g filter="url(#glow)" transform="translate(256, 250)">
+    <!-- Left side bars -->
+    <rect x="-100" y="-30" width="14" height="60" rx="7" fill="url(#waveGrad)" opacity="0.7"/>
+    <rect x="-78" y="-55" width="14" height="110" rx="7" fill="url(#waveGrad)" opacity="0.8"/>
+    <rect x="-56" y="-75" width="14" height="150" rx="7" fill="url(#waveGrad)" opacity="0.85"/>
+    <rect x="-34" y="-50" width="14" height="100" rx="7" fill="url(#waveGrad)" opacity="0.9"/>
+
+    <!-- Center bar (tallest) -->
+    <rect x="-7" y="-95" width="14" height="190" rx="7" fill="url(#accentGrad)" opacity="1"/>
+
+    <!-- Right side bars -->
+    <rect x="20" y="-50" width="14" height="100" rx="7" fill="url(#waveGrad)" opacity="0.9"/>
+    <rect x="42" y="-75" width="14" height="150" rx="7" fill="url(#waveGrad)" opacity="0.85"/>
+    <rect x="64" y="-55" width="14" height="110" rx="7" fill="url(#waveGrad)" opacity="0.8"/>
+    <rect x="86" y="-30" width="14" height="60" rx="7" fill="url(#waveGrad)" opacity="0.7"/>
+  </g>
+
+  <!-- Horizontal accent line under waveform -->
+  <line x1="160" y1="355" x2="352" y2="355" stroke="url(#accentGrad)" stroke-width="2" opacity="0.5" stroke-linecap="round"/>
+
+  <!-- "L" monogram top-left of shield -->
+  <text x="256" y="155" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-weight="800" font-size="52" fill="url(#accentGrad)" letter-spacing="12" opacity="0.9">LS</text>
+
+  <!-- LEGION text -->
+  <text x="256" y="395" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-weight="700" font-size="28" fill="#E2E8F0" letter-spacing="8" opacity="0.9">LEGION</text>
+
+  <!-- STAGE text -->
+  <text x="256" y="422" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-weight="300" font-size="20" fill="#94A3B8" letter-spacing="14" opacity="0.8">STAGE</text>
+</svg>
