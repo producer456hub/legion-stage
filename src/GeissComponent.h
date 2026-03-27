@@ -72,6 +72,10 @@ public:
     void setSpeed(float s) { speedMult = juce::jlimit(0.25f, 4.0f, s); }
     float getSpeed() const { return speedMult; }
 
+    // Auto-pilot mode — audio drives all parameter changes
+    void toggleAutoPilot() { autoPilot = !autoPilot; }
+    bool isAutoPilot() const { return autoPilot; }
+
     void pushSamples(const float* data, int numSamples)
     {
         for (int i = 0; i < numSamples; ++i)
@@ -98,8 +102,82 @@ public:
         double spd = static_cast<double>(speedMult);
         phase += 0.012 * spd;
         effectPhase += 0.02 * spd;
+
+        float energy = juce::jmin(1.0f, smoothedRms.load() * 5.0f);
+        bool isBeat = beatHit.load();
+
+        // ── Auto-pilot: audio drives everything ──
+        if (autoPilot)
+        {
+            juce::Random& rng = juce::Random::getSystemRandom();
+
+            // Speed reacts to energy: quiet = slow & dreamy, loud = fast & intense
+            autoSpeedTarget = 0.5f + energy * 2.5f;
+            speedMult += (autoSpeedTarget - speedMult) * 0.1f;
+            speedMult = juce::jlimit(0.25f, 4.0f, speedMult);
+
+            // Wave scale pulses with energy
+            autoWaveScaleTarget = 0.3f + energy * 2.2f;
+            waveScale += (autoWaveScaleTarget - waveScale) * 0.15f;
+            waveScale = juce::jlimit(0.0f, 3.0f, waveScale);
+
+            // On beats: cycle waveform, sometimes randomize scene
+            if (isBeat)
+            {
+                autoBeatsTotal++;
+
+                // Cycle waveform every 8 beats
+                if (autoBeatsTotal % 8 == 0)
+                    waveMode = (waveMode + 1) % 6;
+
+                // Toggle warp lock occasionally (every ~24 beats)
+                if (autoBeatsTotal % 24 == 0)
+                    warpLocked = !warpLocked;
+
+                // Full scene reset every ~48 beats with blackout
+                if (autoBeatsTotal % 48 == 0)
+                {
+                    phase = rng.nextDouble() * 100.0;
+                    effectPhase = rng.nextDouble() * 100.0;
+                    mapFrameCounter = 0;
+                    warpLocked = false;
+                    blackoutFade = 1.0f;
+                }
+            }
+
+            // During quiet sections, slowly drift waveform mode
+            autoSceneTimer += 0.033f * (1.0f - energy);
+            if (autoSceneTimer > 8.0f)
+            {
+                autoSceneTimer = 0.0f;
+                waveMode = (waveMode + 1) % 6;
+            }
+        }
+
         if (!paletteLocked)
-            palettePhase += 0.004 * spd;
+        {
+            // Audio-reactive palette rotation: louder = faster cycling
+            palettePhase += (0.002 + 0.015 * static_cast<double>(energy)) * spd;
+
+            // Beat hit → jump to a new palette style
+            if (isBeat)
+            {
+                beatPaletteCounter++;
+                if (beatPaletteCounter >= beatsPerPaletteChange)
+                {
+                    paletteStyle = (paletteStyle + 1) % NUM_PALETTE_STYLES;
+                    beatPaletteCounter = 0;
+                    blackoutFade = 1.0f; // flash to black on palette change
+                }
+            }
+
+            // Decay blackout
+            if (blackoutFade > 0.0f)
+                blackoutFade = juce::jmax(0.0f, blackoutFade - 0.08f);
+
+            // Rebuild palette every frame with phase-shifted colors
+            buildPalette();
+        }
         repaint();
     }
 
@@ -130,8 +208,8 @@ public:
         }
         if (!warpLocked) mapFrameCounter--;
 
-        // Step 1: Apply per-pixel warp map (VS1 → VS2)
-        applyWarpMap();
+        // Step 1: Apply per-pixel warp map (VS1 → VS2) with blur
+        applyWarpMapBlur();
 
         // Step 2: Render effects into VS2
         float energy = juce::jmin(1.0f, smoothedRms.load() * 5.0f);
@@ -147,7 +225,11 @@ public:
         // Step 4: Swap buffers
         std::swap(vs1, vs2);
 
-        // Step 5: Blit to JUCE image
+        // Step 5: Blit to JUCE image with palette rotation and energy offset
+        int paletteRotation = static_cast<int>(palettePhase * 256.0) % 256;
+        int energyOffset = static_cast<int>(energy * 30.0f);
+        float brightMult = 1.0f - blackoutFade; // 0 during blackout, 1 normally
+
         juce::Image img(juce::Image::ARGB, w, h, false);
         {
             juce::Image::BitmapData bmp(img, juce::Image::BitmapData::writeOnly);
@@ -157,13 +239,15 @@ public:
                 {
                     int idx = vs1[static_cast<size_t>(y * w + x)];
                     idx = juce::jlimit(0, 255, idx);
+                    // Rotate through palette and shift by energy
+                    idx = (idx + paletteRotation + energyOffset) % 256;
                     uint32_t col = palette[static_cast<size_t>(idx)];
                     auto* pixel = bmp.getPixelPointer(x, y);
-                    // ARGB ordering
-                    pixel[0] = static_cast<uint8_t>((col >> 24) & 0xFF); // B
-                    pixel[1] = static_cast<uint8_t>((col >> 8) & 0xFF);  // G
-                    pixel[2] = static_cast<uint8_t>((col >> 16) & 0xFF); // R
-                    pixel[3] = 0xFF;                                      // A
+                    // JUCE ARGB Image: pixel order is BGRA in memory
+                    pixel[0] = static_cast<uint8_t>(static_cast<float>(col & 0xFF) * brightMult);          // B
+                    pixel[1] = static_cast<uint8_t>(static_cast<float>((col >> 8) & 0xFF) * brightMult);   // G
+                    pixel[2] = static_cast<uint8_t>(static_cast<float>((col >> 16) & 0xFF) * brightMult);  // R
+                    pixel[3] = 0xFF;                                                                        // A
                 }
             }
         }
@@ -191,6 +275,16 @@ private:
     bool paletteLocked = false;  // freeze palette cycling
     float speedMult = 1.0f;      // animation speed multiplier
     int paletteStyle = 0;        // 0-(NUM_PALETTE_STYLES-1) palette type
+    int beatPaletteCounter = 0;  // count beats between palette changes
+    int beatsPerPaletteChange = 4; // change palette every N beats
+    float blackoutFade = 0.0f;    // 1.0 = full blackout, decays to 0
+
+    // Auto-pilot state
+    bool autoPilot = false;
+    int autoBeatsTotal = 0;       // total beats counted in auto mode
+    float autoSceneTimer = 0.0f;  // timer for full scene changes
+    float autoSpeedTarget = 1.0f; // smoothly approach this speed
+    float autoWaveScaleTarget = 1.0f;
 
     // Render buffers — indexed color (0-255)
     int bufW = 0, bufH = 0;
@@ -222,15 +316,17 @@ private:
         return packRGB(ar + (br - ar) * t, ag + (bg - ag) * t, ab + (bb - ab) * t);
     }
 
-    // Build a gradient palette from a list of color stops
+    // Build a cyclic gradient palette from a list of color stops (wraps back to first stop)
     void buildGradientPalette(const uint32_t* stops, int numStops)
     {
+        // Create a cyclic palette: the last stop wraps back to the first
         for (int i = 0; i < 256; ++i)
         {
-            float pos = static_cast<float>(i) / 255.0f * static_cast<float>(numStops - 1);
-            int idx = juce::jmin(static_cast<int>(pos), numStops - 2);
-            float frac = pos - static_cast<float>(idx);
-            palette[static_cast<size_t>(i)] = lerpRGB(stops[idx], stops[idx + 1], frac);
+            float pos = static_cast<float>(i) / 256.0f * static_cast<float>(numStops);
+            int idx = static_cast<int>(pos) % numStops;
+            int next = (idx + 1) % numStops;
+            float frac = pos - std::floor(pos);
+            palette[static_cast<size_t>(i)] = lerpRGB(stops[idx], stops[next], frac);
         }
     }
 
@@ -245,24 +341,24 @@ private:
                 buildGradientPalette(stops, 6);
                 break;
             }
-            case 1: // Ocean — deep navy → teal → cyan → white
+            case 1: // Rainbow — full spectrum cycle
             {
-                const uint32_t stops[] = { packRGB(0,0,0.08f), packRGB(0,0.1f,0.3f), packRGB(0,0.3f,0.5f),
-                    packRGB(0,0.6f,0.7f), packRGB(0.3f,0.9f,1), packRGB(0.9f,1,1) };
+                const uint32_t stops[] = { packRGB(1,0,0), packRGB(1,0.5f,0), packRGB(1,1,0),
+                    packRGB(0,1,0), packRGB(0,0.5f,1), packRGB(0.5f,0,1), packRGB(1,0,0.5f) };
+                buildGradientPalette(stops, 7);
+                break;
+            }
+            case 2: // Copper — black → brown → copper → gold → bright gold
+            {
+                const uint32_t stops[] = { packRGB(0.02f,0.01f,0), packRGB(0.3f,0.15f,0.05f),
+                    packRGB(0.7f,0.35f,0.1f), packRGB(0.9f,0.6f,0.2f), packRGB(1,0.85f,0.4f), packRGB(1,0.95f,0.7f) };
                 buildGradientPalette(stops, 6);
                 break;
             }
-            case 2: // Neon — dark purple → magenta → hot pink → cyan → white
-            {
-                const uint32_t stops[] = { packRGB(0.05f,0,0.1f), packRGB(0.4f,0,0.6f), packRGB(1,0,0.5f),
-                    packRGB(1,0.2f,0.8f), packRGB(0,1,1), packRGB(1,1,1) };
-                buildGradientPalette(stops, 6);
-                break;
-            }
-            case 3: // Forest — black → dark green → emerald → lime → pale green
+            case 3: // Forest — black → dark green → emerald → lime → yellow-green
             {
                 const uint32_t stops[] = { packRGB(0,0.03f,0), packRGB(0,0.2f,0.05f), packRGB(0,0.5f,0.15f),
-                    packRGB(0.2f,0.8f,0.1f), packRGB(0.6f,1,0.3f), packRGB(0.9f,1,0.8f) };
+                    packRGB(0.2f,0.8f,0.1f), packRGB(0.6f,1,0.3f), packRGB(0.9f,1,0.5f) };
                 buildGradientPalette(stops, 6);
                 break;
             }
@@ -273,25 +369,25 @@ private:
                 buildGradientPalette(stops, 6);
                 break;
             }
-            case 5: // Ice — near-black blue → steel blue → ice blue → white
+            case 5: // Candy — pink → peach → yellow → mint → pink
             {
-                const uint32_t stops[] = { packRGB(0.02f,0.02f,0.08f), packRGB(0.1f,0.15f,0.4f),
-                    packRGB(0.3f,0.5f,0.7f), packRGB(0.6f,0.8f,1), packRGB(0.85f,0.95f,1), packRGB(1,1,1) };
+                const uint32_t stops[] = { packRGB(1,0.3f,0.5f), packRGB(1,0.6f,0.3f), packRGB(1,0.9f,0.3f),
+                    packRGB(0.3f,1,0.5f), packRGB(0.3f,0.8f,1), packRGB(0.8f,0.3f,1) };
                 buildGradientPalette(stops, 6);
                 break;
             }
-            case 6: // Sunset — dark indigo → purple → magenta → orange → gold
+            case 6: // Sunset — deep red → orange → golden yellow → warm white
             {
-                const uint32_t stops[] = { packRGB(0.05f,0,0.1f), packRGB(0.2f,0,0.4f), packRGB(0.6f,0,0.5f),
-                    packRGB(1,0.2f,0.2f), packRGB(1,0.6f,0.1f), packRGB(1,0.9f,0.4f) };
+                const uint32_t stops[] = { packRGB(0.3f,0.02f,0), packRGB(0.7f,0.1f,0), packRGB(1,0.35f,0),
+                    packRGB(1,0.6f,0.1f), packRGB(1,0.8f,0.3f), packRGB(1,0.95f,0.7f) };
                 buildGradientPalette(stops, 6);
                 break;
             }
-            case 7: // Monochrome — black → grey → white
+            case 7: // Electric — black → deep yellow → bright yellow → white
             {
-                const uint32_t stops[] = { packRGB(0,0,0), packRGB(0.15f,0.15f,0.15f),
-                    packRGB(0.4f,0.4f,0.4f), packRGB(0.7f,0.7f,0.7f), packRGB(1,1,1) };
-                buildGradientPalette(stops, 5);
+                const uint32_t stops[] = { packRGB(0.02f,0.02f,0), packRGB(0.3f,0.25f,0),
+                    packRGB(0.7f,0.6f,0), packRGB(1,0.9f,0), packRGB(1,1,0.4f), packRGB(1,1,0.85f) };
+                buildGradientPalette(stops, 6);
                 break;
             }
             case 8: // Toxic — black → dark green → bright green → yellow-green → white
@@ -301,10 +397,10 @@ private:
                 buildGradientPalette(stops, 6);
                 break;
             }
-            case 9: // Aurora — dark teal → green → cyan → purple → magenta → pink
+            case 9: // Infrared — black → deep magenta → red → orange → yellow → white
             {
-                const uint32_t stops[] = { packRGB(0,0.05f,0.08f), packRGB(0,0.4f,0.3f), packRGB(0,0.7f,0.6f),
-                    packRGB(0.3f,0.3f,0.8f), packRGB(0.7f,0.1f,0.7f), packRGB(1,0.5f,0.8f) };
+                const uint32_t stops[] = { packRGB(0.05f,0,0.05f), packRGB(0.4f,0,0.2f), packRGB(0.8f,0.05f,0.05f),
+                    packRGB(1,0.3f,0), packRGB(1,0.7f,0), packRGB(1,1,0.6f) };
                 buildGradientPalette(stops, 6);
                 break;
             }
@@ -357,22 +453,42 @@ private:
 
     }
 
-    // ── Apply warp: read VS1 through map, write to VS2 with slight fade ──
-    void applyWarpMap()
+    // ── Apply warp + 3x3 box blur: gives the classic soft Geiss smear ──
+    void applyWarpMapBlur()
     {
-        size_t total = static_cast<size_t>(bufW * bufH);
-        for (size_t i = 0; i < total; ++i)
-        {
-            int x = static_cast<int>(i) % bufW;
-            int y = static_cast<int>(i) / bufW;
-            int sx = x + mapDx[i];
-            int sy = y + mapDy[i];
-            sx = juce::jlimit(0, bufW - 1, sx);
-            sy = juce::jlimit(0, bufH - 1, sy);
+        if (bufW < 4 || bufH < 4) return;
 
-            // Read source with slight fade (the feedback decay that creates trails)
-            int val = vs1[static_cast<size_t>(sy * bufW + sx)];
-            vs2[i] = juce::jmax(0, val - 2);
+        for (int y = 0; y < bufH; ++y)
+        {
+            for (int x = 0; x < bufW; ++x)
+            {
+                size_t i = static_cast<size_t>(y * bufW + x);
+                int sx = x + mapDx[i];
+                int sy = y + mapDy[i];
+
+                // For edge pixels, just do a simple warp with no blur
+                if (sx <= 0 || sx >= bufW - 1 || sy <= 0 || sy >= bufH - 1)
+                {
+                    sx = juce::jlimit(0, bufW - 1, sx);
+                    sy = juce::jlimit(0, bufH - 1, sy);
+                    vs2[i] = juce::jmax(0, vs1[static_cast<size_t>(sy * bufW + sx)] - 1);
+                    continue;
+                }
+
+                // 3x3 weighted average at the warped source position
+                // Center weighted 4x, edges 2x, corners 1x (total 16)
+                int sum = vs1[static_cast<size_t>((sy - 1) * bufW + (sx - 1))]
+                        + vs1[static_cast<size_t>((sy - 1) * bufW + sx)] * 2
+                        + vs1[static_cast<size_t>((sy - 1) * bufW + (sx + 1))]
+                        + vs1[static_cast<size_t>(sy * bufW + (sx - 1))] * 2
+                        + vs1[static_cast<size_t>(sy * bufW + sx)] * 4
+                        + vs1[static_cast<size_t>(sy * bufW + (sx + 1))] * 2
+                        + vs1[static_cast<size_t>((sy + 1) * bufW + (sx - 1))]
+                        + vs1[static_cast<size_t>((sy + 1) * bufW + sx)] * 2
+                        + vs1[static_cast<size_t>((sy + 1) * bufW + (sx + 1))];
+
+                vs2[i] = juce::jmax(0, (sum >> 4) - 1); // divide by 16, slight fade
+            }
         }
     }
 

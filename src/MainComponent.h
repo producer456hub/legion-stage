@@ -11,6 +11,7 @@
 #include "LissajousComponent.h"
 #include "GForceComponent.h"
 #include "GeissComponent.h"
+#include "ProjectMComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -51,6 +52,7 @@ private:
     LissajousComponent lissajousDisplay;
     GForceComponent gforceDisplay;
     GeissComponent geissDisplay;
+    ProjectMComponent projectMDisplay;
     juce::AudioDeviceManager deviceManager;
     juce::AudioProcessorPlayer audioPlayer;
     PluginHost pluginHost;
@@ -116,6 +118,12 @@ private:
     juce::TextButton geissWarpLockBtn { "Warp" };
     juce::TextButton geissPalLockBtn { "PLock" };
     juce::ComboBox geissSpeedSelector;
+    juce::TextButton geissAutoPilotBtn { "Auto" };
+    // ProjectM
+    juce::TextButton pmNextBtn { "Next" };
+    juce::TextButton pmPrevBtn { "Prev" };
+    juce::TextButton pmRandBtn { "Rand" };
+    juce::TextButton pmLockBtn { "Lock" };
     // G-Force
     juce::TextButton gfRibbonUpBtn { "R+" };
     juce::TextButton gfRibbonDownBtn { "R-" };

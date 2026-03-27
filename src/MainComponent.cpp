@@ -24,6 +24,10 @@ MainComponent::MainComponent()
     geissDisplay.setVisible(false);
     pluginHost.geissDisplay = &geissDisplay;
 
+    addAndMakeVisible(projectMDisplay);
+    projectMDisplay.setVisible(false);
+    pluginHost.projectMDisplay = &projectMDisplay;
+
     if (auto* device = deviceManager.getCurrentAudioDevice())
     {
         pluginHost.setAudioParams(device->getCurrentSampleRate(),
@@ -286,6 +290,7 @@ MainComponent::MainComponent()
     visSelector.addItem("Lissajous", 2);
     visSelector.addItem("G-Force", 3);
     visSelector.addItem("Geiss", 4);
+    visSelector.addItem("MilkDrop", 5);
     visSelector.setSelectedId(1, juce::dontSendNotification);
     visSelector.onChange = [this] {
         currentVisMode = visSelector.getSelectedId() - 1;
@@ -372,6 +377,26 @@ MainComponent::MainComponent()
         int idx = geissSpeedSelector.getSelectedId() - 1;
         if (idx >= 0 && idx < 5) geissDisplay.setSpeed(speeds[idx]);
     };
+
+    addAndMakeVisible(geissAutoPilotBtn);
+    geissAutoPilotBtn.setClickingTogglesState(true);
+    geissAutoPilotBtn.onClick = [this] {
+        geissDisplay.toggleAutoPilot();
+    };
+
+    // ── ProjectM (MilkDrop) control buttons ──
+    addAndMakeVisible(pmNextBtn);
+    pmNextBtn.onClick = [this] { projectMDisplay.nextScene(); };
+
+    addAndMakeVisible(pmPrevBtn);
+    pmPrevBtn.onClick = [this] { projectMDisplay.prevScene(); };
+
+    addAndMakeVisible(pmRandBtn);
+    pmRandBtn.onClick = [this] { projectMDisplay.randomScene(); };
+
+    addAndMakeVisible(pmLockBtn);
+    pmLockBtn.setClickingTogglesState(true);
+    pmLockBtn.onClick = [this] { projectMDisplay.toggleLock(); };
 
     // ── G-Force control buttons ──
     addAndMakeVisible(gfRibbonUpBtn);
@@ -679,6 +704,7 @@ MainComponent::~MainComponent()
     pluginHost.spectrumDisplay = nullptr;
     pluginHost.gforceDisplay = nullptr;
     pluginHost.geissDisplay = nullptr;
+    pluginHost.projectMDisplay = nullptr;
     // Clear Lissajous pointer from all tracks
     for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
     {
@@ -1705,6 +1731,7 @@ void MainComponent::resized()
             lissajousDisplay.setVisible(false);
             gforceDisplay.setVisible(false);
             geissDisplay.setVisible(false);
+            projectMDisplay.setVisible(false);
             visExitButton.setVisible(false);
             visSelector.setVisible(false);
             setVisControlsVisible();
@@ -1714,6 +1741,7 @@ void MainComponent::resized()
             else if (currentVisMode == 1) { lissajousDisplay.setBounds(visArea); lissajousDisplay.setVisible(true); }
             else if (currentVisMode == 2) { gforceDisplay.setBounds(visArea); gforceDisplay.setVisible(true); }
             else if (currentVisMode == 3) { geissDisplay.setBounds(visArea); geissDisplay.setVisible(true); }
+            else if (currentVisMode == 4) { projectMDisplay.setBounds(visArea); projectMDisplay.setVisible(true); }
         }
         else
         {
@@ -1773,6 +1801,18 @@ void MainComponent::resized()
                 geissPalLockBtn.setBounds(controlBar.removeFromLeft(50));
                 controlBar.removeFromLeft(3);
                 geissSpeedSelector.setBounds(controlBar.removeFromLeft(60));
+                controlBar.removeFromLeft(3);
+                geissAutoPilotBtn.setBounds(controlBar.removeFromLeft(50));
+            }
+            else if (currentVisMode == 4)
+            {
+                pmPrevBtn.setBounds(controlBar.removeFromLeft(45));
+                controlBar.removeFromLeft(3);
+                pmNextBtn.setBounds(controlBar.removeFromLeft(45));
+                controlBar.removeFromLeft(3);
+                pmRandBtn.setBounds(controlBar.removeFromLeft(45));
+                controlBar.removeFromLeft(3);
+                pmLockBtn.setBounds(controlBar.removeFromLeft(45));
             }
             setVisControlsVisible();
 
@@ -1782,11 +1822,13 @@ void MainComponent::resized()
             lissajousDisplay.setVisible(false);
             gforceDisplay.setVisible(false);
             geissDisplay.setVisible(false);
+            projectMDisplay.setVisible(false);
 
             if (currentVisMode == 0) { spectrumDisplay.setBounds(visArea); spectrumDisplay.setAlpha(1.0f); spectrumDisplay.setVisible(true); }
             else if (currentVisMode == 1) { lissajousDisplay.setBounds(visArea); lissajousDisplay.setVisible(true); }
             else if (currentVisMode == 2) { gforceDisplay.setBounds(visArea); gforceDisplay.setVisible(true); }
             else if (currentVisMode == 3) { geissDisplay.setBounds(visArea); geissDisplay.setVisible(true); }
+            else if (currentVisMode == 4) { projectMDisplay.setBounds(visArea); projectMDisplay.setVisible(true); }
         }
 
         // Hide everything else
@@ -1864,6 +1906,7 @@ void MainComponent::resized()
     lissajousDisplay.setVisible(currentVisMode == 1);
     gforceDisplay.setVisible(currentVisMode == 2);
     geissDisplay.setVisible(currentVisMode == 3);
+    projectMDisplay.setVisible(currentVisMode == 4);
     visExitButton.setVisible(false);
     projectorButton.setVisible(false);
     setVisControlsVisible();
@@ -1931,6 +1974,11 @@ void MainComponent::resized()
         geissDisplay.setBounds(visPanelArea);
         geissDisplay.setVisible(true);
     }
+    else if (currentVisMode == 4)  // MilkDrop
+    {
+        projectMDisplay.setBounds(visPanelArea);
+        projectMDisplay.setVisible(true);
+    }
     rightPanel.removeFromTop(4);
 
     // Visualizer controls below the vis panel
@@ -1985,6 +2033,20 @@ void MainComponent::resized()
         geissPalLockBtn.setBounds(geissRow2.removeFromLeft(50));
         geissRow2.removeFromLeft(3);
         geissSpeedSelector.setBounds(geissRow2.removeFromLeft(60));
+        geissRow2.removeFromLeft(3);
+        geissAutoPilotBtn.setBounds(geissRow2.removeFromLeft(50));
+        rightPanel.removeFromTop(4);
+    }
+    else if (currentVisMode == 4) // MilkDrop
+    {
+        auto pmRow = rightPanel.removeFromTop(28);
+        pmPrevBtn.setBounds(pmRow.removeFromLeft(45));
+        pmRow.removeFromLeft(3);
+        pmNextBtn.setBounds(pmRow.removeFromLeft(45));
+        pmRow.removeFromLeft(3);
+        pmRandBtn.setBounds(pmRow.removeFromLeft(45));
+        pmRow.removeFromLeft(3);
+        pmLockBtn.setBounds(pmRow.removeFromLeft(45));
         rightPanel.removeFromTop(4);
     }
     setVisControlsVisible();
@@ -2185,6 +2247,13 @@ void MainComponent::setVisControlsVisible()
     geissWarpLockBtn.setVisible(geiss);
     geissPalLockBtn.setVisible(geiss);
     geissSpeedSelector.setVisible(geiss);
+    geissAutoPilotBtn.setVisible(geiss);
+
+    bool pm = (currentVisMode == 4);
+    pmNextBtn.setVisible(pm);
+    pmPrevBtn.setVisible(pm);
+    pmRandBtn.setVisible(pm);
+    pmLockBtn.setVisible(pm);
 
     bool gf = (currentVisMode == 2);
     gfRibbonUpBtn.setVisible(gf);

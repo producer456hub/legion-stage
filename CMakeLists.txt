@@ -48,6 +48,7 @@ target_sources(Sequencer PRIVATE
     src/LissajousComponent.h
     src/GForceComponent.h
     src/GeissComponent.h
+    src/ProjectMComponent.h
     src/ThemeManager.h
     src/TimelineComponent.h
     src/TimelineComponent.cpp

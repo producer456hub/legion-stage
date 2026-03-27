@@ -3,6 +3,7 @@
 #include "LissajousComponent.h"
 #include "GForceComponent.h"
 #include "GeissComponent.h"
+#include "ProjectMComponent.h"
 
 PluginHost::PluginHost()
 {
@@ -456,6 +457,8 @@ void PluginHost::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer
             gforceDisplay->pushSamples(mono, count);
         if (geissDisplay != nullptr)
             geissDisplay->pushSamples(mono, count);
+        if (projectMDisplay != nullptr)
+            projectMDisplay->pushSamples(mono, count);
     }
 
 }

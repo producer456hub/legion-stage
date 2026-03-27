@@ -11,6 +11,7 @@ class SpectrumComponent;
 class LissajousComponent;
 class GForceComponent;
 class GeissComponent;
+class ProjectMComponent;
 
 struct FxSlot {
     juce::AudioProcessorGraph::Node::Ptr node;
@@ -75,6 +76,7 @@ public:
     SpectrumComponent* spectrumDisplay = nullptr;
     GForceComponent* gforceDisplay = nullptr;
     GeissComponent* geissDisplay = nullptr;
+    ProjectMComponent* projectMDisplay = nullptr;
 
 private:
     juce::AudioPluginFormatManager formatManager;

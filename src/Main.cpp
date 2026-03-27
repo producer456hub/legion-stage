@@ -1,5 +1,6 @@
 #include <JuceHeader.h>
 #include "MainComponent.h"
+#include "CrashLog.h"
 
 class MainWindow : public juce::DocumentWindow
 {
@@ -35,6 +36,7 @@ public:
 
     void initialise(const juce::String& /*commandLine*/) override
     {
+        CrashLog::install();
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
     }
 
