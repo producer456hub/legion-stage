@@ -49,6 +49,7 @@ target_sources(Sequencer PRIVATE
     src/GForceComponent.h
     src/GeissComponent.h
     src/ProjectMComponent.h
+    src/TouchPianoComponent.h
     src/ThemeManager.h
     src/TimelineComponent.h
     src/TimelineComponent.cpp

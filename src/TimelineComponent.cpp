@@ -269,8 +269,8 @@ void TimelineComponent::mouseDrag(const juce::MouseEvent& e)
     {
         double beatDelta = currentBeat - dragStartBeat;
         double newPos = clipOrigPosition + beatDelta;
-        // Snap to quarter beat
-        newPos = std::floor(newPos * 4.0 + 0.5) / 4.0;
+        // Snap to grid resolution
+        newPos = snapToGrid(newPos);
         if (newPos < 0.0) newPos = 0.0;
         clip->timelinePosition = newPos;
 
@@ -313,16 +313,15 @@ void TimelineComponent::mouseDrag(const juce::MouseEvent& e)
     }
     else if (dragMode == ResizeClipRight)
     {
-        double newEnd = currentBeat;
-        newEnd = std::floor(newEnd * 4.0 + 0.5) / 4.0;
+        double newEnd = snapToGrid(currentBeat);
         double newLength = newEnd - clip->timelinePosition;
-        if (newLength < 0.25) newLength = 0.25;
+        if (newLength < gridResolution) newLength = gridResolution;
         clip->lengthInBeats = newLength;
     }
     else if (dragMode == ResizeClipLeft)
     {
-        double newStart = currentBeat;
-        newStart = std::floor(newStart * 4.0 + 0.5) / 4.0;
+        double newStart = snapToGrid(currentBeat);
+        if (newStart < 0.0) newStart = 0.0;
         if (newStart < 0.0) newStart = 0.0;
 
         double origEnd = clipOrigPosition + clipOrigLength;
@@ -808,21 +807,45 @@ void TimelineComponent::drawHeader(juce::Graphics& g)
             int barNum = static_cast<int>(beat / 4.0) + 1;
             g.setColour(juce::Colour(0xffcccccc));
             g.setFont(11.0f);
-            g.drawText(juce::String(barNum), static_cast<int>(x) + 2, 0, 40, headerHeight,
+            g.drawText(juce::String(barNum), static_cast<int>(x) + 2, 0, 40, headerHeight / 2,
                        juce::Justification::centredLeft);
+            // Tall tick mark
+            g.setColour(juce::Colour(0xff888888));
+            g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight / 2),
+                               static_cast<float>(headerHeight));
+            // Grid line down into track area
             g.setColour(juce::Colour(0xff666666));
+            g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight),
+                               static_cast<float>(getHeight()));
         }
         else if (isBeat)
         {
+            // Beat number within bar (1-4)
+            int beatInBar = (static_cast<int>(std::round(beat)) % 4) + 1;
+            g.setColour(juce::Colour(0xff888888));
+            g.setFont(9.0f);
+            g.drawText(juce::String(beatInBar), static_cast<int>(x) + 1, headerHeight / 2 - 2,
+                       20, headerHeight / 2, juce::Justification::centredLeft);
+            // Medium tick mark
+            g.setColour(juce::Colour(0xff555555));
+            g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight * 2 / 3),
+                               static_cast<float>(headerHeight));
+            // Grid line
             g.setColour(juce::Colour(0xff444444));
+            g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight),
+                               static_cast<float>(getHeight()));
         }
         else
         {
+            // Subdivision tick mark in header
+            g.setColour(juce::Colour(0xff444444));
+            g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight * 3 / 4),
+                               static_cast<float>(headerHeight));
+            // Faint grid line
             g.setColour(juce::Colour(0xff2d2d2d));
+            g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight),
+                               static_cast<float>(getHeight()));
         }
-
-        g.drawVerticalLine(static_cast<int>(x), static_cast<float>(headerHeight),
-                           static_cast<float>(getHeight()));
     }
 
     g.setColour(juce::Colour(0xff444444));

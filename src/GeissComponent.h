@@ -76,6 +76,10 @@ public:
     void toggleAutoPilot() { autoPilot = !autoPilot; }
     bool isAutoPilot() const { return autoPilot; }
 
+    // Black background — forces low palette values to pure black
+    void setBlackBg(bool on) { blackBg = on; buildPalette(); }
+    bool isBlackBg() const { return blackBg; }
+
     void pushSamples(const float* data, int numSamples)
     {
         for (int i = 0; i < numSamples; ++i)
@@ -279,6 +283,8 @@ private:
     int beatsPerPaletteChange = 4; // change palette every N beats
     float blackoutFade = 0.0f;    // 1.0 = full blackout, decays to 0
 
+    bool blackBg = false;           // force black background
+
     // Auto-pilot state
     bool autoPilot = false;
     int autoBeatsTotal = 0;       // total beats counted in auto mode
@@ -327,6 +333,17 @@ private:
             int next = (idx + 1) % numStops;
             float frac = pos - std::floor(pos);
             palette[static_cast<size_t>(i)] = lerpRGB(stops[idx], stops[next], frac);
+        }
+
+        // Force low palette values to black for black background mode
+        if (blackBg)
+        {
+            uint32_t black = packRGB(0, 0, 0);
+            for (int i = 0; i < 64; ++i)
+            {
+                float t = static_cast<float>(i) / 64.0f;
+                palette[static_cast<size_t>(i)] = lerpRGB(black, palette[static_cast<size_t>(i)], t * t);
+            }
         }
     }
 

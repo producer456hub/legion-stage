@@ -12,6 +12,7 @@
 #include "GForceComponent.h"
 #include "GeissComponent.h"
 #include "ProjectMComponent.h"
+#include "TouchPianoComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -108,6 +109,13 @@ private:
     bool projectorMode = false;
     juce::TextButton testNoteButton { "Test Note" };
 
+    // ── Touch Piano ──
+    TouchPianoComponent touchPiano;
+    juce::TextButton pianoToggleButton { "KEYS" };
+    juce::TextButton pianoOctUpButton { "Oct+" };
+    juce::TextButton pianoOctDownButton { "Oct-" };
+    bool touchPianoVisible = false;
+
     // ── Visualizer Controls ──
     // Geiss
     juce::TextButton geissWaveBtn { "Wave" };
@@ -119,11 +127,13 @@ private:
     juce::TextButton geissPalLockBtn { "PLock" };
     juce::ComboBox geissSpeedSelector;
     juce::TextButton geissAutoPilotBtn { "Auto" };
+    juce::TextButton geissBgBtn { "BG" };
     // ProjectM
     juce::TextButton pmNextBtn { "Next" };
     juce::TextButton pmPrevBtn { "Prev" };
     juce::TextButton pmRandBtn { "Rand" };
     juce::TextButton pmLockBtn { "Lock" };
+    juce::TextButton pmBgBtn { "BG" };
     // G-Force
     juce::TextButton gfRibbonUpBtn { "R+" };
     juce::TextButton gfRibbonDownBtn { "R-" };

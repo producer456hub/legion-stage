@@ -101,7 +101,11 @@ MainComponent::MainComponent()
             for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
             {
                 auto* cp = pluginHost.getTrack(t).clipPlayer;
-                if (cp) cp->sendAllNotesOff.store(true);
+                if (cp)
+                {
+                    cp->stopAllSlots();
+                    cp->sendAllNotesOff.store(true);
+                }
             }
         }
         if (timelineComponent) timelineComponent->repaint();
@@ -384,6 +388,10 @@ MainComponent::MainComponent()
         geissDisplay.toggleAutoPilot();
     };
 
+    addAndMakeVisible(geissBgBtn);
+    geissBgBtn.setClickingTogglesState(true);
+    geissBgBtn.onClick = [this] { geissDisplay.setBlackBg(geissBgBtn.getToggleState()); };
+
     // ── ProjectM (MilkDrop) control buttons ──
     addAndMakeVisible(pmNextBtn);
     pmNextBtn.onClick = [this] { projectMDisplay.nextScene(); };
@@ -397,6 +405,10 @@ MainComponent::MainComponent()
     addAndMakeVisible(pmLockBtn);
     pmLockBtn.setClickingTogglesState(true);
     pmLockBtn.onClick = [this] { projectMDisplay.toggleLock(); };
+
+    addAndMakeVisible(pmBgBtn);
+    pmBgBtn.setClickingTogglesState(true);
+    pmBgBtn.onClick = [this] { projectMDisplay.setBlackBg(pmBgBtn.getToggleState()); };
 
     // ── G-Force control buttons ──
     addAndMakeVisible(gfRibbonUpBtn);
@@ -542,6 +554,28 @@ MainComponent::MainComponent()
     };
 
     testNoteButton.setVisible(false);
+
+    // ── Touch Piano ──
+    addChildComponent(touchPiano);  // hidden by default
+    touchPiano.onNote = [this](int note, bool isOn) {
+        if (isOn) sendNoteOn(note);
+        else      sendNoteOff(note);
+    };
+
+    addAndMakeVisible(pianoToggleButton);
+    pianoToggleButton.setClickingTogglesState(true);
+    pianoToggleButton.onClick = [this] {
+        touchPianoVisible = pianoToggleButton.getToggleState();
+        touchPiano.setVisible(touchPianoVisible);
+        resized();
+        repaint();
+    };
+
+    addAndMakeVisible(pianoOctUpButton);
+    pianoOctUpButton.onClick = [this] { touchPiano.octaveUp(); };
+
+    addAndMakeVisible(pianoOctDownButton);
+    pianoOctDownButton.onClick = [this] { touchPiano.octaveDown(); };
 
     // ── Bottom Bar: Mix Controls ──
     addAndMakeVisible(volumeSlider);
@@ -1699,6 +1733,8 @@ void MainComponent::resized()
     loopButton.setBounds(topBar.removeFromLeft(60));
     topBar.removeFromLeft(3);
     panicButton.setBounds(topBar.removeFromLeft(65));
+    topBar.removeFromLeft(3);
+    pianoToggleButton.setBounds(topBar.removeFromLeft(55));
     topBar.removeFromLeft(4);
     scrollLeftButton.setBounds(topBar.removeFromLeft(40));
     topBar.removeFromLeft(2);
@@ -1803,6 +1839,8 @@ void MainComponent::resized()
                 geissSpeedSelector.setBounds(controlBar.removeFromLeft(60));
                 controlBar.removeFromLeft(3);
                 geissAutoPilotBtn.setBounds(controlBar.removeFromLeft(50));
+                controlBar.removeFromLeft(3);
+                geissBgBtn.setBounds(controlBar.removeFromLeft(30));
             }
             else if (currentVisMode == 4)
             {
@@ -1813,6 +1851,8 @@ void MainComponent::resized()
                 pmRandBtn.setBounds(controlBar.removeFromLeft(45));
                 controlBar.removeFromLeft(3);
                 pmLockBtn.setBounds(controlBar.removeFromLeft(45));
+                controlBar.removeFromLeft(3);
+                pmBgBtn.setBounds(controlBar.removeFromLeft(30));
             }
             setVisControlsVisible();
 
@@ -2035,6 +2075,8 @@ void MainComponent::resized()
         geissSpeedSelector.setBounds(geissRow2.removeFromLeft(60));
         geissRow2.removeFromLeft(3);
         geissAutoPilotBtn.setBounds(geissRow2.removeFromLeft(50));
+        geissRow2.removeFromLeft(3);
+        geissBgBtn.setBounds(geissRow2.removeFromLeft(28));
         rightPanel.removeFromTop(4);
     }
     else if (currentVisMode == 4) // MilkDrop
@@ -2047,6 +2089,8 @@ void MainComponent::resized()
         pmRandBtn.setBounds(pmRow.removeFromLeft(45));
         pmRow.removeFromLeft(3);
         pmLockBtn.setBounds(pmRow.removeFromLeft(45));
+        pmRow.removeFromLeft(3);
+        pmBgBtn.setBounds(pmRow.removeFromLeft(28));
         rightPanel.removeFromTop(4);
     }
     setVisControlsVisible();
@@ -2115,6 +2159,27 @@ void MainComponent::resized()
 
     panLabel.setBounds(panArea.removeFromTop(14));
     panSlider.setBounds(panArea.reduced(8, 0));
+
+    // ── Touch Piano (bottom of main area, when visible) ──
+    if (touchPianoVisible)
+    {
+        auto pianoBar = area.removeFromBottom(4);  // small gap
+        (void)pianoBar;
+        auto pianoControlRow = area.removeFromBottom(28);
+        pianoOctDownButton.setBounds(pianoControlRow.removeFromLeft(45));
+        pianoControlRow.removeFromLeft(3);
+        pianoOctUpButton.setBounds(pianoControlRow.removeFromLeft(45));
+        pianoOctDownButton.setVisible(true);
+        pianoOctUpButton.setVisible(true);
+
+        auto pianoArea = area.removeFromBottom(100);
+        touchPiano.setBounds(pianoArea);
+    }
+    else
+    {
+        pianoOctDownButton.setVisible(false);
+        pianoOctUpButton.setVisible(false);
+    }
 
     // ── Timeline fills the rest ──
     area.reduce(2, 2);
@@ -2248,12 +2313,14 @@ void MainComponent::setVisControlsVisible()
     geissPalLockBtn.setVisible(geiss);
     geissSpeedSelector.setVisible(geiss);
     geissAutoPilotBtn.setVisible(geiss);
+    geissBgBtn.setVisible(geiss);
 
     bool pm = (currentVisMode == 4);
     pmNextBtn.setVisible(pm);
     pmPrevBtn.setVisible(pm);
     pmRandBtn.setVisible(pm);
     pmLockBtn.setVisible(pm);
+    pmBgBtn.setVisible(pm);
 
     bool gf = (currentVisMode == 2);
     gfRibbonUpBtn.setVisible(gf);

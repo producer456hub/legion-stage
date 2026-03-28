@@ -10,8 +10,10 @@ void SequencerEngine::play()
         countingIn.store(true);
         countInBeatsRemaining = 4.0; // 1 bar (4 beats)
         savedPosition = positionInBeats.load();
+        countInFirstClick = true;
     }
 
+    playFirstClick = true;
     playing.store(true);
 }
 
@@ -73,18 +75,29 @@ double SequencerEngine::advancePosition(int numSamples, double sampleRate)
         countInBeatsRemaining -= beatsThisBlock;
 
         // ALWAYS play metronome clicks during count-in (regardless of metronome toggle)
-        double countInPos = 4.0 - countInBeatsRemaining;
-        double prevPos = countInPos - beatsThisBlock;
-
-        int oldBeat = static_cast<int>(std::floor(prevPos));
-        int newBeat = static_cast<int>(std::floor(countInPos));
-
-        if (newBeat > oldBeat)
+        // Fire first click immediately
+        if (countInFirstClick)
         {
-            bool isDownbeat = (newBeat % 4) == 0;
-            clickFrequency = isDownbeat ? 1500.0 : 1000.0;
-            clickSamplesRemaining = static_cast<int>(sampleRate * 0.03); // slightly longer click for count-in
+            countInFirstClick = false;
+            clickFrequency = 1500.0; // downbeat
+            clickSamplesRemaining = static_cast<int>(sampleRate * 0.03);
             clickPhase = 0.0;
+        }
+        else
+        {
+            double countInPos = 4.0 - countInBeatsRemaining;
+            double prevPos = countInPos - beatsThisBlock;
+
+            int oldBeat = static_cast<int>(std::floor(prevPos));
+            int newBeat = static_cast<int>(std::floor(countInPos));
+
+            if (newBeat > oldBeat)
+            {
+                bool isDownbeat = (newBeat % 4) == 0;
+                clickFrequency = isDownbeat ? 1500.0 : 1000.0;
+                clickSamplesRemaining = static_cast<int>(sampleRate * 0.03);
+                clickPhase = 0.0;
+            }
         }
 
         if (countInBeatsRemaining <= 0.0)
@@ -103,6 +116,20 @@ double SequencerEngine::advancePosition(int numSamples, double sampleRate)
     // Metronome clicks during normal playback
     if (metronomeEnabled.load())
     {
+        // Fire first click immediately when play starts on a beat
+        if (playFirstClick)
+        {
+            playFirstClick = false;
+            if (std::fmod(oldPos, 1.0) < 0.001)
+            {
+                int beat = static_cast<int>(std::floor(oldPos));
+                bool isDownbeat = (beat % 4) == 0;
+                clickFrequency = isDownbeat ? 1500.0 : 1000.0;
+                clickSamplesRemaining = static_cast<int>(sampleRate * 0.02);
+                clickPhase = 0.0;
+            }
+        }
+
         int oldBeat = static_cast<int>(std::floor(oldPos));
         int newBeat = static_cast<int>(std::floor(newPos));
 
@@ -113,6 +140,10 @@ double SequencerEngine::advancePosition(int numSamples, double sampleRate)
             clickSamplesRemaining = static_cast<int>(sampleRate * 0.02);
             clickPhase = 0.0;
         }
+    }
+    else
+    {
+        playFirstClick = false;
     }
 
     // Loop wrap-around

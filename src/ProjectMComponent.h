@@ -51,6 +51,9 @@ public:
     void toggleLock() { locked = !locked; }
     bool isLocked() const { return locked; }
 
+    void setBlackBg(bool on) { blackBg = on; buildPalette(); }
+    bool isBlackBg() const { return blackBg; }
+
     void pushSamples(const float* data, int numSamples)
     {
         for (int i = 0; i < numSamples; ++i)
@@ -184,6 +187,7 @@ private:
     int mapFrameCounter = 0;
     int sceneIndex = 0;
     bool locked = false;
+    bool blackBg = false;
     int beatCounter = 0;
 
     int bufW = 0, bufH = 0;
@@ -308,6 +312,17 @@ private:
 
             // Morph between A and B
             palette[static_cast<size_t>(i)] = lerpRGB(colA, colB, paletteMorph);
+        }
+
+        // Force low palette values to black for black background mode
+        if (blackBg)
+        {
+            uint32_t black = packRGB(0, 0, 0);
+            for (int i = 0; i < 64; ++i)
+            {
+                float t = static_cast<float>(i) / 64.0f;
+                palette[static_cast<size_t>(i)] = lerpRGB(black, palette[static_cast<size_t>(i)], t * t);
+            }
         }
     }
 
@@ -458,7 +473,10 @@ private:
 
     // ── Effects ──
 
-    // Warped audio waveform — drawn as a morphing curve
+    // Wave drawing mode — changes with scene for maximum variety
+    int waveDrawMode = 0;
+    static constexpr int NUM_WAVE_MODES = 8;
+
     void renderWarpedWave(float energy)
     {
         std::array<float, WAVE_SIZE> wave;
@@ -471,31 +489,163 @@ private:
         float t = static_cast<float>(effectPhase);
         int brightness = static_cast<int>(120 + energy * 135);
 
-        // Draw two interleaved waveforms with different parametric paths
-        for (int w = 0; w < 2; ++w)
+        // Pick wave mode based on scene for variety (or override)
+        int mode = (waveDrawMode + sceneIndex) % NUM_WAVE_MODES;
+
+        switch (mode)
         {
-            float wOffset = w * 3.14159f;
-            for (int i = 1; i < WAVE_SIZE; ++i)
+            case 0: // Dual interleaved circles (original)
             {
-                float frac = static_cast<float>(i) / WAVE_SIZE;
-                float sample = wave[i] * (1.0f + energy * 3.0f);
-                float angle = frac * juce::MathConstants<float>::twoPi + t * (0.5f + w * 0.3f) + wOffset;
-                float r = juce::jmin(bufW, bufH) * (0.15f + 0.15f * std::sin(t * 0.3f + w)) + sample * bufH * 0.2f;
-
-                int px = static_cast<int>(cx + std::cos(angle) * r);
-                int py = static_cast<int>(cy + std::sin(angle) * r);
-
-                if (px >= 0 && px < bufW && py >= 0 && py < bufH)
+                for (int w = 0; w < 2; ++w)
                 {
-                    size_t idx = static_cast<size_t>(py * bufW + px);
-                    vs2[idx] = juce::jmin(255, vs2[idx] + brightness);
-                    // Thicken the line
-                    if (px + 1 < bufW) vs2[idx + 1] = juce::jmin(255, vs2[idx + 1] + brightness / 2);
-                    if (py + 1 < bufH) vs2[static_cast<size_t>((py + 1) * bufW + px)] =
-                        juce::jmin(255, vs2[static_cast<size_t>((py + 1) * bufW + px)] + brightness / 2);
+                    float wOffset = w * 3.14159f;
+                    for (int i = 1; i < WAVE_SIZE; ++i)
+                    {
+                        float frac = static_cast<float>(i) / WAVE_SIZE;
+                        float sample = wave[i] * (1.0f + energy * 3.0f);
+                        float angle = frac * juce::MathConstants<float>::twoPi + t * (0.5f + w * 0.3f) + wOffset;
+                        float r = juce::jmin(bufW, bufH) * (0.15f + 0.15f * std::sin(t * 0.3f + w)) + sample * bufH * 0.2f;
+                        plotThick(static_cast<int>(cx + std::cos(angle) * r),
+                                  static_cast<int>(cy + std::sin(angle) * r), brightness);
+                    }
                 }
+                break;
+            }
+            case 1: // Horizontal mirrored bars
+            {
+                for (int i = 0; i < WAVE_SIZE; ++i)
+                {
+                    float frac = static_cast<float>(i) / WAVE_SIZE;
+                    float sample = std::abs(wave[i]) * (1.0f + energy * 2.5f);
+                    int px = static_cast<int>(frac * bufW);
+                    int barH = static_cast<int>(sample * bufH * 0.4f);
+                    int brt = static_cast<int>(brightness * (0.5f + sample));
+                    for (int dy = 0; dy < barH; dy += 2)
+                    {
+                        plotPixel(px, static_cast<int>(cy) - dy, brt);
+                        plotPixel(px, static_cast<int>(cy) + dy, brt);
+                    }
+                }
+                break;
+            }
+            case 2: // Star burst — waveform as radial spokes
+            {
+                int numSpokes = 12 + static_cast<int>(energy * 12);
+                for (int s = 0; s < numSpokes; ++s)
+                {
+                    float spokeAngle = static_cast<float>(s) / numSpokes * juce::MathConstants<float>::twoPi + t * 0.2f;
+                    for (int i = 0; i < WAVE_SIZE; i += 3)
+                    {
+                        float frac = static_cast<float>(i) / WAVE_SIZE;
+                        float sample = wave[i] * (1.0f + energy * 2.0f);
+                        float r = frac * juce::jmin(bufW, bufH) * 0.45f + sample * 20.0f;
+                        plotThick(static_cast<int>(cx + std::cos(spokeAngle) * r),
+                                  static_cast<int>(cy + std::sin(spokeAngle) * r), brightness / 2);
+                    }
+                }
+                break;
+            }
+            case 3: // Lissajous figure-8
+            {
+                float freqX = 2.0f + std::floor(std::sin(t * 0.2f) * 2.0f);
+                float freqY = 3.0f + std::floor(std::cos(t * 0.15f) * 2.0f);
+                for (int i = 0; i < WAVE_SIZE; ++i)
+                {
+                    float frac = static_cast<float>(i) / WAVE_SIZE;
+                    float sample = wave[i] * (1.0f + energy * 2.0f);
+                    float angle = frac * juce::MathConstants<float>::twoPi;
+                    float rx = juce::jmin(bufW, bufH) * 0.3f + sample * 30.0f;
+                    plotThick(static_cast<int>(cx + std::sin(angle * freqX + t * 0.5f) * rx),
+                              static_cast<int>(cy + std::cos(angle * freqY + t * 0.3f) * rx * 0.7f), brightness);
+                }
+                break;
+            }
+            case 4: // Grid waveform — horizontal + vertical cross
+            {
+                int step = 4;
+                for (int i = 0; i < WAVE_SIZE; i += step)
+                {
+                    float frac = static_cast<float>(i) / WAVE_SIZE;
+                    float sample = wave[i] * (1.0f + energy * 2.5f);
+                    // Horizontal wave
+                    int hx = static_cast<int>(frac * bufW);
+                    int hy = static_cast<int>(cy + sample * bufH * 0.35f);
+                    plotThick(hx, hy, brightness);
+                    // Vertical wave
+                    int vy = static_cast<int>(frac * bufH);
+                    int vx = static_cast<int>(cx + sample * bufW * 0.35f);
+                    plotThick(vx, vy, brightness);
+                }
+                break;
+            }
+            case 5: // Spiral outward
+            {
+                for (int i = 0; i < WAVE_SIZE; ++i)
+                {
+                    float frac = static_cast<float>(i) / WAVE_SIZE;
+                    float sample = wave[i] * (1.0f + energy * 2.0f);
+                    float angle = frac * juce::MathConstants<float>::twoPi * 4.0f + t;
+                    float r = frac * juce::jmin(bufW, bufH) * 0.4f + sample * 25.0f;
+                    plotThick(static_cast<int>(cx + std::cos(angle) * r),
+                              static_cast<int>(cy + std::sin(angle) * r), brightness);
+                }
+                break;
+            }
+            case 6: // Diamond/square wave
+            {
+                for (int i = 0; i < WAVE_SIZE; ++i)
+                {
+                    float frac = static_cast<float>(i) / WAVE_SIZE;
+                    float sample = wave[i] * (1.0f + energy * 2.5f);
+                    float side = juce::jmin(bufW, bufH) * 0.3f + sample * 30.0f;
+                    // Walk around a diamond shape
+                    float px, py;
+                    float seg = std::fmod(frac * 4.0f, 4.0f);
+                    if (seg < 1.0f)      { px = cx + side * seg;         py = cy - side * (1.0f - seg); }
+                    else if (seg < 2.0f) { px = cx + side * (2.0f - seg); py = cy + side * (seg - 1.0f); }
+                    else if (seg < 3.0f) { px = cx - side * (seg - 2.0f); py = cy + side * (3.0f - seg); }
+                    else                 { px = cx - side * (4.0f - seg); py = cy - side * (seg - 3.0f); }
+                    // Rotate over time
+                    float ca = std::cos(t * 0.3f), sa = std::sin(t * 0.3f);
+                    float rx = (px - cx) * ca - (py - cy) * sa + cx;
+                    float ry = (px - cx) * sa + (py - cy) * ca + cy;
+                    plotThick(static_cast<int>(rx), static_cast<int>(ry), brightness);
+                }
+                break;
+            }
+            case 7: // Scatter dots — random positions weighted by wave amplitude
+            {
+                uint32_t seed = static_cast<uint32_t>(t * 777.0);
+                for (int i = 0; i < WAVE_SIZE; i += 2)
+                {
+                    float sample = std::abs(wave[i]) * (1.0f + energy * 2.0f);
+                    seed = seed * 1664525u + 1013904223u;
+                    float angle = static_cast<float>(seed & 0xFFFF) / 65536.0f * juce::MathConstants<float>::twoPi;
+                    float r = sample * juce::jmin(bufW, bufH) * 0.45f;
+                    int px = static_cast<int>(cx + std::cos(angle) * r);
+                    int py = static_cast<int>(cy + std::sin(angle) * r);
+                    int brt = static_cast<int>(60 + sample * 300.0f);
+                    plotPixel(px, py, brt);
+                }
+                break;
             }
         }
+    }
+
+    void plotPixel(int x, int y, int brightness)
+    {
+        if (x < 0 || x >= bufW || y < 0 || y >= bufH) return;
+        size_t idx = static_cast<size_t>(y * bufW + x);
+        vs2[idx] = juce::jmin(255, vs2[idx] + brightness);
+    }
+
+    void plotThick(int x, int y, int brightness)
+    {
+        plotPixel(x, y, brightness);
+        plotPixel(x + 1, y, brightness / 2);
+        plotPixel(x, y + 1, brightness / 2);
+        plotPixel(x - 1, y, brightness / 3);
+        plotPixel(x, y - 1, brightness / 3);
     }
 
     // Pulsars — bright expanding rings on beats

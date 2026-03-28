@@ -20,11 +20,7 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     // Send all-notes-off if flagged (prevents stuck notes)
     if (sendAllNotesOff.exchange(false))
     {
-        for (int ch = 1; ch <= 16; ++ch)
-        {
-            midi.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
-            midi.addEvent(juce::MidiMessage::allSoundOff(ch), 0);
-        }
+        killActiveNotes(midi, 0);
     }
 
     // Check if we should start recording (not during count-in)
@@ -41,14 +37,16 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
             }
         }
 
-        // If no slot is armed, auto-find an empty slot (arrangement view flow)
+        // If no slot is armed, auto-find an empty/available slot
         if (targetSlot < 0)
         {
             for (int i = 0; i < NUM_SLOTS; ++i)
             {
-                auto state = slots[static_cast<size_t>(i)].state.load();
+                auto& s = slots[static_cast<size_t>(i)];
+                auto state = s.state.load();
                 if (state == ClipSlot::Empty ||
-                    (slots[static_cast<size_t>(i)].clip != nullptr && !slots[static_cast<size_t>(i)].hasContent() && state == ClipSlot::Stopped))
+                    (state == ClipSlot::Stopped && !s.hasContent()) ||
+                    (state == ClipSlot::Stopped && s.clip == nullptr))
                 {
                     targetSlot = i;
                     break;
@@ -77,6 +75,17 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     // Handle playback for all playing clips
     if (engine.isPlaying())
     {
+        double currentPos = engine.getPositionInBeats();
+
+        // Detect loop wrap-around (position jumped backward) — kill all sounding notes
+        bool loopJustWrapped = (currentPos < lastPositionInBeats - 0.001);
+        if (loopJustWrapped)
+        {
+            killActiveNotes(midi, 0);
+            // Reset lastPositionInBeats so the first-beat logic works on the wrapped position
+            lastPositionInBeats = currentPos - 0.001;
+        }
+
         for (int i = 0; i < NUM_SLOTS; ++i)
         {
             if (slots[static_cast<size_t>(i)].state.load() == ClipSlot::Playing)
@@ -85,7 +94,7 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
             }
         }
 
-        lastPositionInBeats = engine.getPositionInBeats();
+        lastPositionInBeats = currentPos;
     }
 
     // Audio passes through unchanged (this node only handles MIDI)
@@ -97,9 +106,12 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
     if (slot.clip == nullptr) return;
 
     auto& clip = *slot.clip;
-    double pos = engine.getPositionInBeats();
     double bpm = engine.getBpm();
     double beatsPerSample = (bpm / 60.0) / currentSampleRate;
+    double beatsThisBlock = beatsPerSample * numSamples;
+    // Position was already advanced, so subtract back to get block start
+    double pos = engine.getPositionInBeats() - beatsThisBlock;
+    if (pos < 0.0) pos = 0.0;
 
     double clipLen = clip.lengthInBeats;
     if (clipLen <= 0.0) return;
@@ -114,9 +126,7 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
 
     if (wasInsideClip[static_cast<size_t>(slotIndex)] && !isInsideNow)
     {
-        // Just exited the clip — kill all notes
-        for (int ch = 1; ch <= 16; ++ch)
-            midi.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
+        killActiveNotes(midi, 0);
     }
     wasInsideClip[static_cast<size_t>(slotIndex)] = isInsideNow;
 
@@ -133,11 +143,6 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
 
         double clipPos = relPos;
         double prevRelPos = relPos - beatsPerSample;
-        double prevClipPos = prevRelPos;
-        if (prevClipPos < 0.0) prevClipPos = 0.0;
-
-        // No wrap-around in arranger mode
-        bool wrapped = false;
 
         for (int e = 0; e < clip.events.getNumEvents(); ++e)
         {
@@ -146,21 +151,28 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
 
             bool shouldTrigger = false;
 
-            if (wrapped)
+            if (prevRelPos < 0.0)
             {
-                // Event is between prevClipPos..end OR 0..clipPos
-                if (eventBeat > prevClipPos || eventBeat <= clipPos)
+                // First sample inside the clip — trigger events at or before clipPos
+                if (eventBeat >= 0.0 && eventBeat <= clipPos + 0.0001)
                     shouldTrigger = true;
             }
             else
             {
-                if (eventBeat > prevClipPos && eventBeat <= clipPos)
+                // Normal case: half-open interval (prevClipPos, clipPos]
+                if (eventBeat > prevRelPos && eventBeat <= clipPos + 0.0001)
                     shouldTrigger = true;
             }
 
             if (shouldTrigger)
             {
                 midi.addEvent(event->message, sample);
+
+                // Track active notes for clean loop/stop handling
+                if (event->message.isNoteOn())
+                    activePlaybackNotes.insert((event->message.getChannel() << 8) | event->message.getNoteNumber());
+                else if (event->message.isNoteOff())
+                    activePlaybackNotes.erase((event->message.getChannel() << 8) | event->message.getNoteNumber());
             }
         }
     }
@@ -312,4 +324,22 @@ void ClipPlayerNode::stopAllSlots()
 {
     for (int i = 0; i < NUM_SLOTS; ++i)
         stopSlot(i);
+}
+
+void ClipPlayerNode::killActiveNotes(juce::MidiBuffer& midi, int sampleOffset)
+{
+    for (int key : activePlaybackNotes)
+    {
+        int ch = (key >> 8) & 0xF;
+        int note = key & 0x7F;
+        midi.addEvent(juce::MidiMessage::noteOff(ch, note), sampleOffset);
+    }
+    activePlaybackNotes.clear();
+
+    // Belt and suspenders — also send CC 123 (all notes off) and CC 120 (all sound off)
+    for (int ch = 1; ch <= 16; ++ch)
+    {
+        midi.addEvent(juce::MidiMessage::allNotesOff(ch), sampleOffset);
+        midi.addEvent(juce::MidiMessage::allSoundOff(ch), sampleOffset);
+    }
 }

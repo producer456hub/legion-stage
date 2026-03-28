@@ -64,6 +64,9 @@ private:
     std::atomic<bool> countingIn { false };
     double countInBeatsRemaining = 0.0;
     double savedPosition = 0.0;  // where to start after count-in
+    bool countInFirstClick = false;  // fire click on first audio block of count-in
+
+    bool playFirstClick = false;  // fire metronome on first audio block of play
 
     // Loop
     std::atomic<bool> loopEnabled { false };
