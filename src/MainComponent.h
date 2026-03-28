@@ -14,6 +14,7 @@
 #include "ProjectMComponent.h"
 #include "TouchPianoComponent.h"
 #include "MixerComponent.h"
+#include "UpdateDialog.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -77,6 +78,9 @@ private:
     juce::Label bpmLabel;
     juce::TextButton bpmUpButton { "+" };
     juce::Label beatLabel;
+    juce::TextButton tapTempoButton { "TAP" };
+    juce::Array<double> tapTimes;
+    static constexpr int maxTaps = 8;
 
     // ── Edit Toolbar ──
     juce::TextButton newClipButton { "New Clip" };
@@ -89,6 +93,7 @@ private:
     juce::TextButton countInButton { "Count-In" };
     juce::TextButton loopButton { "LOOP" };
     juce::TextButton panicButton { "PANIC" };
+    double panicAnimEndTime = 0.0;
 
     // ── Navigation ──
     juce::TextButton zoomInButton { "Zoom +" };
@@ -102,6 +107,7 @@ private:
     juce::ComboBox midiInputSelector;
     juce::TextButton midiRefreshButton { "Refresh" };
     juce::TextButton audioSettingsButton { "Audio Settings" };
+    juce::TextButton settingsButton { "Settings" };
     juce::TextButton fullscreenButton { "VIS" };
     juce::ComboBox visSelector;
     bool visualizerFullScreen = false;
@@ -252,6 +258,7 @@ private:
     void selectMidiDevice();
     void disableCurrentMidiDevice();
     void showAudioSettings();
+    void showSettingsMenu();
     void updateStatusLabel();
     void applyThemeToControls();
 

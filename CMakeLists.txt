@@ -54,6 +54,10 @@ target_sources(Sequencer PRIVATE
     src/ThemeManager.h
     src/TimelineComponent.h
     src/TimelineComponent.cpp
+    src/UpdateChecker.h
+    src/UpdateChecker.cpp
+    src/UpdateDialog.h
+    src/UpdateDialog.cpp
 )
 
 target_compile_definitions(Sequencer PRIVATE

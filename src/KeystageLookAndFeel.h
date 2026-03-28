@@ -236,87 +236,19 @@ public:
         g.drawRoundedRectangle(bounds, 3.0f, 0.8f);
     }
 
-    // Plot a pixel in the OLED buffer
-    static void oledPlot(juce::Image& img, int x, int y, juce::Colour col)
+    // Keystage overrides the base OLED art with ice-blue colors and custom REC
+    bool drawOledButtonArt(juce::Image& oled, const juce::String& text,
+                           bool on, float t, juce::Colour, juce::Colour) const override
     {
-        if (x >= 0 && x < img.getWidth() && y >= 0 && y < img.getHeight())
-            img.setPixelAt(x, y, col);
-    }
-
-    static void oledLine(juce::Image& img, int x0, int y0, int x1, int y1, juce::Colour col)
-    {
-        int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-        int dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-        int err = dx + dy;
-        while (true)
-        {
-            oledPlot(img, x0, y0, col);
-            if (x0 == x1 && y0 == y1) break;
-            int e2 = 2 * err;
-            if (e2 >= dy) { err += dy; x0 += sx; }
-            if (e2 <= dx) { err += dx; y0 += sy; }
-        }
-    }
-
-    static void oledCircle(juce::Image& img, int cx, int cy, int r, juce::Colour col, bool fill = false)
-    {
-        for (int dy = -r; dy <= r; ++dy)
-            for (int dx = -r; dx <= r; ++dx)
-            {
-                int d2 = dx * dx + dy * dy;
-                if (fill ? (d2 <= r * r) : (d2 >= (r - 1) * (r - 1) && d2 <= r * r))
-                    oledPlot(img, cx + dx, cy + dy, col);
-            }
-    }
-
-    void drawButtonText(juce::Graphics& g, juce::TextButton& button,
-                        bool, bool) override
-    {
-        auto dispBounds = button.getLocalBounds().toFloat().reduced(2.0f);
-        auto text = button.getButtonText();
-        bool on = button.getToggleState();
-        float t = static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.001);
-
         juce::Colour ice(0xffb8d8f0);
         juce::Colour dim(0xff3a5060);
-
-        // Render to tiny pixel buffer then scale up
-        juce::Image oled(juce::Image::ARGB, OLED_W, OLED_H, true);
-        float cx = OLED_W * 0.5f;
-        float cy = OLED_H * 0.5f;
         int icx = OLED_W / 2;
         int icy = OLED_H / 2;
 
-        juce::Colour col = on ? ice : dim;
-        bool handled = true;
-        bool isAnimated = (text == "REC" || text == "PLAY" || text == "MET" ||
-                           text == "LOOP" || text == "PANIC" || text == "LEARN" ||
-                           text == "MIX");
-
-        // Static buttons: skip the image pipeline, just draw text
-        if (!isAnimated && text != "STOP" && text != "KEYS")
-        {
-            g.setColour(on ? ice : ice.withAlpha(0.7f));
-            g.setFont(juce::Font(getUIFontName(),
-                       juce::jmin(12.0f, dispBounds.getHeight() * 0.5f), juce::Font::bold));
-            g.drawText(formatButtonText(text), button.getLocalBounds().reduced(2),
-                       juce::Justification::centred);
-            return;
-        }
-
-        // Only animate when the button is actually "on" (save CPU for idle buttons)
-        if (isAnimated && !on && text != "MIX" && text != "KEYS")
-        {
-            g.setColour(dim);
-            g.setFont(juce::Font(getUIFontName(),
-                       juce::jmin(10.0f, dispBounds.getHeight() * 0.45f), juce::Font::bold));
-            g.drawText(formatButtonText(text), button.getLocalBounds().reduced(2),
-                       juce::Justification::centred);
-            return;
-        }
-
+        // REC: Keystage-specific pulsing circle with expanding rings
         if (text == "REC")
         {
+            juce::Colour col = on ? ice : dim;
             float pulse = on ? (0.5f + 0.5f * std::sin(t * 8.0f)) : 1.0f;
             oledCircle(oled, icx, icy, 3, col.withAlpha(pulse), true);
             if (on)
@@ -324,154 +256,43 @@ public:
                 int ringR = 4 + (static_cast<int>(t * 6.0f) % 3);
                 oledCircle(oled, icx, icy, ringR, ice.withAlpha(0.3f));
             }
-        }
-        else if (text == "PLAY")
-        {
-            for (int row = -3; row <= 3; ++row)
-            {
-                int pw = 3 - std::abs(row);
-                for (int c = 0; c <= pw; ++c)
-                    oledPlot(oled, icx - 1 + c, icy + row, col);
-            }
-            if (on)
-            {
-                int offset = static_cast<int>(t * 12.0f) % OLED_W;
-                for (int i = 0; i < OLED_W; i += 6)
-                {
-                    int px = (i + offset) % OLED_W;
-                    for (int py = 2; py < OLED_H - 2; py += 3)
-                        oledPlot(oled, px, py, ice.withAlpha(0.2f));
-                }
-            }
-        }
-        else if (text == "STOP")
-        {
-            for (int dy = -2; dy <= 2; ++dy)
-                for (int dx = -2; dx <= 2; ++dx)
-                    oledPlot(oled, icx + dx, icy + dy, col);
-        }
-        else if (text == "MET")
-        {
-            float swing = on ? std::sin(t * 4.0f) * 5.0f : 0.0f;
-            int px = icx + static_cast<int>(swing);
-            oledLine(oled, icx, 2, px, OLED_H - 3, col);
-            oledPlot(oled, px - 1, OLED_H - 3, col);
-            oledPlot(oled, px, OLED_H - 3, col);
-            oledPlot(oled, px + 1, OLED_H - 3, col);
-            oledPlot(oled, icx - 1, 2, col);
-            oledPlot(oled, icx, 2, col);
-            oledPlot(oled, icx + 1, 2, col);
-        }
-        else if (text == "LOOP")
-        {
-            float angle = on ? t * 3.0f : 0.0f;
-            int r = 4;
-            for (int i = 0; i < 22; ++i)
-            {
-                float a = angle + i * 0.26f;
-                oledPlot(oled, icx + static_cast<int>(std::cos(a) * r),
-                         icy + static_cast<int>(std::sin(a) * r), col);
-            }
-            float ha = angle;
-            int ax = icx + static_cast<int>(std::cos(ha) * r);
-            int ay = icy + static_cast<int>(std::sin(ha) * r);
-            oledPlot(oled, ax + 1, ay, col);
-            oledPlot(oled, ax, ay + 1, col);
-        }
-        else if (text == "PANIC")
-        {
-            oledLine(oled, icx + 3, 2, icx, icy - 1, col);
-            oledLine(oled, icx, icy - 1, icx + 2, icy, col);
-            oledLine(oled, icx + 2, icy, icx - 3, OLED_H - 3, col);
-            if (on)
-            {
-                int frame = static_cast<int>(t * 10.0f);
-                for (int i = 0; i < 5; ++i)
-                {
-                    int spx = 3 + ((frame * 7 + i * 11) % (OLED_W - 6));
-                    int spy = 2 + ((frame * 5 + i * 9) % (OLED_H - 4));
-                    oledPlot(oled, spx, spy, ice.withAlpha(0.5f));
-                }
-            }
-        }
-        else if (text == "LEARN")
-        {
-            oledCircle(oled, icx, icy, 4, col);
-            oledPlot(oled, icx, icy, col);
-            if (on)
-            {
-                float sweepA = t * 4.0f;
-                for (int r = 1; r <= 4; ++r)
-                    oledPlot(oled, icx + static_cast<int>(std::cos(sweepA) * r),
-                             icy + static_cast<int>(std::sin(sweepA) * r), ice);
-            }
-        }
-        else if (text == "KEYS")
-        {
-            for (int i = 0; i < 7; ++i)
-            {
-                int kx = icx - 6 + i * 2;
-                for (int ky = icy - 3; ky <= icy + 3; ++ky)
-                    oledPlot(oled, kx, ky, col);
-            }
-            int bk[] = { 0, 1, 3, 4, 5 };
-            for (int b : bk)
-            {
-                int kx = icx - 6 + b * 2 + 1;
-                for (int ky = icy - 3; ky <= icy; ++ky)
-                    oledPlot(oled, kx, ky, juce::Colour(0xff000000));
-            }
-        }
-        else if (text == "MIX")
-        {
-            for (int i = 0; i < 5; ++i)
-            {
-                int fx = icx - 6 + i * 3;
-                int thumbYi = icy + static_cast<int>(std::sin(i * 1.5f + (on ? t * 0.5f : 0)) * 2);
-                oledLine(oled, fx, 2, fx, OLED_H - 3, dim);
-                oledPlot(oled, fx - 1, thumbYi, col);
-                oledPlot(oled, fx, thumbYi, col);
-                oledPlot(oled, fx + 1, thumbYi, col);
-            }
-        }
-        else
-        {
-            handled = false;
+            return true;
         }
 
-        if (handled)
+        // For all other animated buttons, delegate to base class with ice-blue colors
+        return DawLookAndFeel::drawOledButtonArt(oled, text, on, t, ice, dim);
+    }
+
+    void drawButtonText(juce::Graphics& g, juce::TextButton& button,
+                        bool, bool) override
+    {
+        auto text = button.getButtonText();
+        bool on = button.getToggleState();
+
+        juce::Colour ice(0xffb8d8f0);
+        juce::Colour dim(0xff3a5060);
+
+        // Use OLED animation for animated buttons
+        if (isOledAnimatedButton(text) || text == "REC" || text == "PANIC")
         {
-            // Scale up centered with aspect ratio preserved — chunky pixels
-            g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
-            float oledAspect = static_cast<float>(OLED_W) / static_cast<float>(OLED_H);
-            float btnAspect = dispBounds.getWidth() / dispBounds.getHeight();
-            float drawW, drawH;
-            if (btnAspect > oledAspect)
+            auto dispBounds = button.getLocalBounds().toFloat().reduced(2.0f);
+            float t = static_cast<float>(juce::Time::getMillisecondCounterHiRes() * 0.001);
+
+            juce::Image oled(juce::Image::ARGB, OLED_W, OLED_H, true);
+            if (drawOledButtonArt(oled, text, on, t, ice, dim))
             {
-                drawH = dispBounds.getHeight();
-                drawW = drawH * oledAspect;
+                drawOledImage(g, oled, dispBounds);
+                return;
             }
-            else
-            {
-                drawW = dispBounds.getWidth();
-                drawH = drawW / oledAspect;
-            }
-            float drawX = dispBounds.getCentreX() - drawW * 0.5f;
-            float drawY = dispBounds.getCentreY() - drawH * 0.5f;
-            g.drawImage(oled,
-                        static_cast<int>(drawX), static_cast<int>(drawY),
-                        static_cast<int>(drawW), static_cast<int>(drawH),
-                        0, 0, OLED_W, OLED_H);
         }
-        else
-        {
-            // Default: text in ice blue
-            g.setColour(on ? ice : (button.isEnabled() ? ice.withAlpha(0.7f) : dim));
-            g.setFont(juce::Font(getUIFontName(),
-                       juce::jmin(12.0f, dispBounds.getHeight() * 0.5f), juce::Font::bold));
-            g.drawText(formatButtonText(text), button.getLocalBounds().reduced(2),
-                       juce::Justification::centred);
-        }
+
+        // Default: ice blue text
+        auto dispBounds = button.getLocalBounds().toFloat().reduced(2.0f);
+        g.setColour(on ? ice : ice.withAlpha(0.7f));
+        g.setFont(juce::Font(getUIFontName(),
+                   juce::jmin(12.0f, dispBounds.getHeight() * 0.5f), juce::Font::bold));
+        g.drawText(formatButtonText(text), button.getLocalBounds().reduced(2),
+                   juce::Justification::centred);
     }
 
     // Custom combo box with OLED-style display

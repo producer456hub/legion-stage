@@ -41,7 +41,8 @@ public:
 
         repaint();
 
-        if (elapsed > totalDuration && onFinished)
+        // Once boot text has fully scrolled, signal we're done
+        if (visibleBootLines >= bootLines.size() && onFinished)
         {
             stopTimer();
             onFinished();
@@ -81,13 +82,7 @@ public:
             drawBootSequence(g, w, h, ice, bootAlpha);
         }
 
-        // Final fade to black
-        if (elapsed > totalDuration - 0.8f)
-        {
-            float fade = (elapsed - (totalDuration - 0.8f)) / 0.8f;
-            g.setColour(juce::Colours::black.withAlpha(juce::jlimit(0.0f, 1.0f, fade)));
-            g.fillAll();
-        }
+        // No fade-out — code stays visible until main UI launches
     }
 
 private:

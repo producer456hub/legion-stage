@@ -138,6 +138,25 @@ MainComponent::MainComponent()
 
     addAndMakeVisible(beatLabel);
 
+    addAndMakeVisible(tapTempoButton);
+    tapTempoButton.onClick = [this] {
+        double now = juce::Time::getMillisecondCounterHiRes();
+        // Reset if last tap was more than 2 seconds ago
+        if (tapTimes.size() > 0 && (now - tapTimes.getLast()) > 2000.0)
+            tapTimes.clear();
+        tapTimes.add(now);
+        if (tapTimes.size() > maxTaps)
+            tapTimes.remove(0);
+        if (tapTimes.size() >= 2)
+        {
+            double totalInterval = tapTimes.getLast() - tapTimes.getFirst();
+            double avgInterval = totalInterval / (tapTimes.size() - 1);
+            double bpm = juce::jlimit(20.0, 300.0, 60000.0 / avgInterval);
+            pluginHost.getEngine().setBpm(bpm);
+            bpmLabel.setText(juce::String(static_cast<int>(bpm)) + " BPM", juce::dontSendNotification);
+        }
+    };
+
     // ── Edit Toolbar ──
     addAndMakeVisible(newClipButton);
     newClipButton.onClick = [this] {
@@ -223,6 +242,7 @@ MainComponent::MainComponent()
                 track.clipPlayer->sendAllNotesOff.store(true);
         }
         statusLabel.setText("MIDI Panic — all notes off", juce::dontSendNotification);
+        panicAnimEndTime = juce::Time::getMillisecondCounterHiRes() * 0.001 + 3.0;
     };
 
     addAndMakeVisible(zoomInButton);
@@ -280,6 +300,8 @@ MainComponent::MainComponent()
 
     addAndMakeVisible(audioSettingsButton);
     audioSettingsButton.onClick = [this] { showAudioSettings(); };
+    addAndMakeVisible(settingsButton);
+    settingsButton.onClick = [this] { showSettingsMenu(); };
 
     addAndMakeVisible(fullscreenButton);
     fullscreenButton.setClickingTogglesState(true);
@@ -810,6 +832,23 @@ void MainComponent::timerCallback()
     loopButton.setToggleState(eng.isLoopEnabled(), juce::dontSendNotification);
     countInButton.setToggleState(eng.isCountInEnabled(), juce::dontSendNotification);
 
+    // Repaint animated OLED buttons so pixel animations update at 15 FPS
+    playButton.repaint();
+    stopButton.repaint();
+    metronomeButton.repaint();
+    loopButton.repaint();
+    countInButton.repaint();
+    midiLearnButton.repaint();
+    mixerButton.repaint();
+    pianoToggleButton.repaint();
+    fullscreenButton.repaint();
+    projectorButton.repaint();
+    {
+        double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        panicButton.setToggleState(now < panicAnimEndTime, juce::dontSendNotification);
+    }
+    panicButton.repaint();
+
     // Auto-snapshot when recording stops (detect transition)
     static bool wasRecording = false;
     bool isRec = false;
@@ -1300,6 +1339,31 @@ void MainComponent::showAudioSettings()
             pluginHost.setAudioParams(dev->getCurrentSampleRate(), dev->getCurrentBufferSizeSamples());
         updateStatusLabel();
     });
+}
+
+void MainComponent::showSettingsMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem(1, "Check for Updates...");
+
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&settingsButton),
+        [this](int result)
+        {
+            if (result == 1)
+            {
+                auto* dialog = new UpdateDialog();
+                dialog->setSize(550, 420);
+                juce::DialogWindow::LaunchOptions opts;
+                opts.content.setOwned(dialog);
+                opts.dialogTitle = "Software Update";
+                opts.componentToCentreAround = this;
+                opts.dialogBackgroundColour = getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId);
+                opts.escapeKeyTriggersCloseButton = true;
+                opts.useNativeTitleBar = true;
+                opts.resizable = false;
+                opts.launchAsync();
+            }
+        });
 }
 
 void MainComponent::updateStatusLabel()
@@ -1814,12 +1878,6 @@ void MainComponent::resized()
     topBar.removeFromLeft(4);
 
     beatLabel.setBounds(topBar.removeFromRight(100));
-    topBar.removeFromRight(3);
-    bpmUpButton.setBounds(topBar.removeFromRight(44));
-    topBar.removeFromRight(2);
-    bpmLabel.setBounds(topBar.removeFromRight(75));
-    topBar.removeFromRight(2);
-    bpmDownButton.setBounds(topBar.removeFromRight(44));
 
     // ── Fullscreen Visualizer Mode ──
     if (visualizerFullScreen)
@@ -1951,6 +2009,7 @@ void MainComponent::resized()
         redoButton.setVisible(false);
         themeSelector.setVisible(false);
         audioSettingsButton.setVisible(false);
+        settingsButton.setVisible(false);
         midi2Button.setVisible(false);
         pluginSelector.setVisible(false);
         openEditorButton.setVisible(false);
@@ -1988,6 +2047,7 @@ void MainComponent::resized()
     redoButton.setVisible(true);
     themeSelector.setVisible(true);
     audioSettingsButton.setVisible(true);
+    settingsButton.setVisible(true);
     midi2Button.setVisible(true);
     pluginSelector.setVisible(true);
     openEditorButton.setVisible(true);
@@ -2045,6 +2105,14 @@ void MainComponent::resized()
     redoButton.setBounds(toolbar.removeFromLeft(50));
 
     // Pack remaining controls at the right end of the toolbar
+    tapTempoButton.setBounds(toolbar.removeFromRight(50));
+    toolbar.removeFromRight(3);
+    bpmUpButton.setBounds(toolbar.removeFromRight(32));
+    toolbar.removeFromRight(2);
+    bpmLabel.setBounds(toolbar.removeFromRight(70));
+    toolbar.removeFromRight(2);
+    bpmDownButton.setBounds(toolbar.removeFromRight(32));
+    toolbar.removeFromRight(6);
     midi2Button.setBounds(toolbar.removeFromRight(36));
     toolbar.removeFromRight(2);
     visSelector.setBounds(toolbar.removeFromRight(72));
@@ -2054,6 +2122,8 @@ void MainComponent::resized()
     fullscreenButton.setBounds(toolbar.removeFromRight(32));
     toolbar.removeFromRight(2);
     audioSettingsButton.setBounds(toolbar.removeFromRight(80));
+    toolbar.removeFromRight(2);
+    settingsButton.setBounds(toolbar.removeFromRight(60));
     toolbar.removeFromRight(2);
     themeSelector.setBounds(toolbar.removeFromRight(82));
 

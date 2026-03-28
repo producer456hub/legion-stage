@@ -51,6 +51,11 @@ public:
     void initialise(const juce::String& /*commandLine*/) override
     {
         CrashLog::install();
+
+        juce::File oldExe("C:\\Program Files\\Legion Stage\\Legion Stage.exe.old");
+        if (oldExe.existsAsFile())
+            oldExe.deleteFile();
+
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
     }
 
