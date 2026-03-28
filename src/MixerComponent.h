@@ -26,7 +26,7 @@ public:
 
     ~MixerComponent() override { stopTimer(); }
 
-    void timerCallback() override { repaint(); }
+    void timerCallback() override { if (isVisible()) repaint(); }
 
     void paint(juce::Graphics& g) override
     {

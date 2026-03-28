@@ -38,6 +38,7 @@ private:
 
     // View state
     double scrollX = 0.0;
+    double lastPaintedScrollX = -1.0;
     int scrollY = 0;           // vertical scroll offset in pixels
     double pixelsPerBeat = 40.0;
     int trackHeight = 72;      // computed dynamically to fit 8 tracks

@@ -833,17 +833,15 @@ void MainComponent::timerCallback()
     loopButton.setToggleState(eng.isLoopEnabled(), juce::dontSendNotification);
     countInButton.setToggleState(eng.isCountInEnabled(), juce::dontSendNotification);
 
-    // Repaint animated OLED buttons so pixel animations update at 15 FPS
-    playButton.repaint();
-    stopButton.repaint();
-    metronomeButton.repaint();
-    loopButton.repaint();
-    countInButton.repaint();
-    midiLearnButton.repaint();
-    mixerButton.repaint();
-    pianoToggleButton.repaint();
-    fullscreenButton.repaint();
-    projectorButton.repaint();
+    // Only repaint OLED buttons during playback (animations active)
+    if (eng.isPlaying())
+    {
+        playButton.repaint();
+        stopButton.repaint();
+        metronomeButton.repaint();
+        loopButton.repaint();
+        countInButton.repaint();
+    }
     {
         double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
         panicButton.setToggleState(now < panicAnimEndTime, juce::dontSendNotification);

@@ -123,8 +123,10 @@ void TimelineComponent::timerCallback()
         }
     }
 
-    // Always repaint so meters update even when transport is stopped
-    repaint();
+    // Only repaint when playing or scroll changed
+    if (engine.isPlaying() || scrollX != lastPaintedScrollX)
+        repaint();
+    lastPaintedScrollX = scrollX;
 }
 
 // ── Mouse handling ───────────────────────────────────────────────────────────
