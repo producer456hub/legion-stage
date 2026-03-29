@@ -299,9 +299,16 @@ MainComponent::MainComponent()
     }
 
     addAndMakeVisible(audioSettingsButton);
-    audioSettingsButton.onClick = [this] { showAudioSettings(); };
-    addAndMakeVisible(settingsButton);
-    settingsButton.onClick = [this] { showSettingsMenu(); };
+    audioSettingsButton.onClick = [this] {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Audio Settings...");
+        menu.addItem(2, "Check for Updates...");
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&audioSettingsButton),
+            [this](int result) {
+                if (result == 1) showAudioSettings();
+                else if (result == 2) showSettingsMenu();
+            });
+    };
 
     addAndMakeVisible(fullscreenButton);
     fullscreenButton.setClickingTogglesState(true);
@@ -2005,7 +2012,6 @@ void MainComponent::resized()
         redoButton.setVisible(false);
         themeSelector.setVisible(false);
         audioSettingsButton.setVisible(false);
-        settingsButton.setVisible(false);
         midi2Button.setVisible(false);
         pluginSelector.setVisible(false);
         openEditorButton.setVisible(false);
@@ -2043,7 +2049,6 @@ void MainComponent::resized()
     redoButton.setVisible(true);
     themeSelector.setVisible(true);
     audioSettingsButton.setVisible(true);
-    settingsButton.setVisible(true);
     midi2Button.setVisible(true);
     pluginSelector.setVisible(true);
     openEditorButton.setVisible(true);
@@ -2118,8 +2123,6 @@ void MainComponent::resized()
     fullscreenButton.setBounds(toolbar.removeFromRight(32));
     toolbar.removeFromRight(2);
     audioSettingsButton.setBounds(toolbar.removeFromRight(80));
-    toolbar.removeFromRight(2);
-    settingsButton.setBounds(toolbar.removeFromRight(60));
     toolbar.removeFromRight(2);
     themeSelector.setBounds(toolbar.removeFromRight(82));
 
