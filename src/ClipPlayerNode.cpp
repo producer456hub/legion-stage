@@ -18,14 +18,11 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     int numSamples = buffer.getNumSamples();
 
     // Send all-notes-off if flagged (stop/panic — hard kill)
-    bool skipPlayback = false;
     if (sendAllNotesOff.exchange(false))
     {
         killActiveNotes(midi, 0, true);
-        // Set high so next play detects a "wrap" and does a clean-start skip
-        lastPositionInBeats = 999999.0;
+        lastPositionInBeats = -1.0;
         wasInsideClip.fill(false);
-        skipPlayback = true;
     }
 
     // Check if we should start recording (not during count-in)
@@ -64,10 +61,12 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
             auto& slot = slots[static_cast<size_t>(targetSlot)];
             if (slot.clip == nullptr)
                 slot.clip = std::make_unique<MidiClip>();
-            slot.clip->timelinePosition = engine.getPositionInBeats();
+            double beatsPerSample = (engine.getBpm() / 60.0) / currentSampleRate;
+            double blockStartPos = engine.getPositionInBeats() - (beatsPerSample * numSamples);
+            slot.clip->timelinePosition = blockStartPos;
             slot.state.store(ClipSlot::Recording);
             recordingSlot = targetSlot;
-            recordStartBeat = engine.getPositionInBeats();
+            recordStartBeat = blockStartPos;
         }
     }
 
@@ -82,23 +81,21 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     {
         double currentPos = engine.getPositionInBeats();
 
-        // Detect loop wrap-around (position jumped backward) — kill all sounding notes
-        bool loopJustWrapped = (currentPos < lastPositionInBeats - 0.001);
-        if (loopJustWrapped)
+        // Detect loop wrap-around or play start (position jumped) — kill all sounding notes
+        bool positionJumped = (currentPos < lastPositionInBeats - 0.001);
+        if (positionJumped)
         {
             killActiveNotes(midi, 0);
-            lastPositionInBeats = currentPos - 0.001;
-            skipPlayback = true;
+            wasInsideClip.fill(false);
         }
 
-        if (!skipPlayback)
+        // Always run clip playback — note-offs were added first in the buffer
+        // so synths process them before any new note-ons
+        for (int i = 0; i < NUM_SLOTS; ++i)
         {
-            for (int i = 0; i < NUM_SLOTS; ++i)
+            if (slots[static_cast<size_t>(i)].state.load() == ClipSlot::Playing)
             {
-                if (slots[static_cast<size_t>(i)].state.load() == ClipSlot::Playing)
-                {
-                    processClipPlayback(i, midi, numSamples);
-                }
+                processClipPlayback(i, midi, numSamples);
             }
         }
 
@@ -117,73 +114,47 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
     double bpm = engine.getBpm();
     double beatsPerSample = (bpm / 60.0) / currentSampleRate;
     double beatsThisBlock = beatsPerSample * numSamples;
-    // Position was already advanced, so subtract back to get block start
-    double pos = engine.getPositionInBeats() - beatsThisBlock;
-    if (pos < 0.0) pos = 0.0;
+    double blockStart = engine.getPositionInBeats() - beatsThisBlock;
+    if (blockStart < 0.0) blockStart = 0.0;
+    double blockEnd = blockStart + beatsThisBlock;
 
-    double clipLen = clip.lengthInBeats;
-    if (clipLen <= 0.0) return;
+    double clipStart = clip.timelinePosition;
+    double clipEnd = clipStart + clip.lengthInBeats;
+    if (clip.lengthInBeats <= 0.0) return;
 
-    double clipTimelineStart = clip.timelinePosition;
-    double clipTimelineEnd = clipTimelineStart + clipLen;
-
-    // Check if playhead just exited this clip — send all-notes-off
-    double blockStartBeat = pos;
-    double blockEndBeat = pos + (numSamples * beatsPerSample);
-    bool isInsideNow = (blockEndBeat > clipTimelineStart && blockStartBeat < clipTimelineEnd);
-
-    if (wasInsideClip[static_cast<size_t>(slotIndex)] && !isInsideNow)
-    {
+    // Detect clip exit → kill active notes
+    bool isInside = (blockEnd > clipStart && blockStart < clipEnd);
+    if (wasInsideClip[static_cast<size_t>(slotIndex)] && !isInside)
         killActiveNotes(midi, 0);
-    }
-    wasInsideClip[static_cast<size_t>(slotIndex)] = isInsideNow;
+    wasInsideClip[static_cast<size_t>(slotIndex)] = isInside;
+    if (!isInside) return;
 
-    for (int sample = 0; sample < numSamples; ++sample)
+    // Clip-relative time range for this block
+    double relStart = juce::jmax(0.0, blockStart - clipStart);
+    double relEnd = blockEnd - clipStart;
+
+    // Use JUCE's getNextIndexAtTime to find first event in range
+    int startIdx = clip.events.getNextIndexAtTime(relStart);
+
+    for (int e = startIdx; e < clip.events.getNumEvents(); ++e)
     {
-        double beatPos = pos + (sample * beatsPerSample);
+        auto* holder = clip.events.getEventPointer(e);
+        double eventBeat = holder->message.getTimeStamp();
 
-        // Calculate clip-local position — NO looping in arranger mode
-        double relPos = beatPos - clipTimelineStart;
+        if (eventBeat >= relEnd)
+            break;
 
-        // Skip if playhead is before or past the clip
-        // Use small epsilon past clipLen to catch note-offs at the boundary
-        if (relPos < 0.0 || relPos >= clipLen + 0.01)
-            continue;
+        // Calculate sample offset within block
+        double eventAbsBeat = clipStart + eventBeat;
+        int samplePos = static_cast<int>((eventAbsBeat - blockStart) / beatsPerSample);
+        samplePos = juce::jlimit(0, numSamples - 1, samplePos);
 
-        double clipPos = relPos;
-        double prevClipPos = relPos - beatsPerSample;
+        midi.addEvent(holder->message, samplePos);
 
-        for (int e = 0; e < clip.events.getNumEvents(); ++e)
-        {
-            auto* event = clip.events.getEventPointer(e);
-            double eventBeat = event->message.getTimeStamp();
-
-            bool shouldTrigger = false;
-
-            if (sample == 0 && relPos < beatsPerSample)
-            {
-                // First sample inside the clip — trigger events at beat 0 only once
-                if (eventBeat >= 0.0 && eventBeat <= clipPos + 0.0001)
-                    shouldTrigger = true;
-            }
-            else if (prevClipPos >= 0.0)
-            {
-                // Normal case: half-open interval (prevClipPos, clipPos]
-                if (eventBeat > prevClipPos && eventBeat <= clipPos + 0.0001)
-                    shouldTrigger = true;
-            }
-
-            if (shouldTrigger)
-            {
-                midi.addEvent(event->message, sample);
-
-                // Track active notes for clean loop/stop handling
-                if (event->message.isNoteOn())
-                    activePlaybackNotes.insert((event->message.getChannel() << 8) | event->message.getNoteNumber());
-                else if (event->message.isNoteOff())
-                    activePlaybackNotes.erase((event->message.getChannel() << 8) | event->message.getNoteNumber());
-            }
-        }
+        if (holder->message.isNoteOn())
+            activePlaybackNotes.insert((holder->message.getChannel() << 8) | holder->message.getNoteNumber());
+        else if (holder->message.isNoteOff())
+            activePlaybackNotes.erase((holder->message.getChannel() << 8) | holder->message.getNoteNumber());
     }
 }
 
@@ -196,7 +167,9 @@ void ClipPlayerNode::processRecording(const juce::MidiBuffer& incomingMidi, int 
 
     double bpm = engine.getBpm();
     double beatsPerSample = (bpm / 60.0) / currentSampleRate;
-    double pos = engine.getPositionInBeats();
+    double beatsThisBlock = beatsPerSample * numSamples;
+    // Use start-of-block position (engine already advanced past this block)
+    double pos = engine.getPositionInBeats() - beatsThisBlock;
 
     for (const auto metadata : incomingMidi)
     {
@@ -242,7 +215,11 @@ void ClipPlayerNode::triggerSlot(int slotIndex)
         // Click recording slot → stop recording, auto-set to Playing
         recordingSlot = -1;
         if (slot.clip != nullptr)
+        {
             slot.clip->events.sort();
+            closeOpenNotes(*slot.clip);
+            slot.clip->events.updateMatchedPairs();
+        }
         slot.state.store(slot.hasContent() ? ClipSlot::Playing : ClipSlot::Empty);
         return;
     }
@@ -314,7 +291,11 @@ void ClipPlayerNode::stopSlot(int slotIndex)
     {
         recordingSlot = -1;
         if (slot.clip != nullptr)
+        {
             slot.clip->events.sort();
+            closeOpenNotes(*slot.clip);
+            slot.clip->events.updateMatchedPairs();
+        }
         // After recording, go to Playing only if we captured notes — otherwise clean up
         if (slot.hasContent())
         {
@@ -333,6 +314,31 @@ void ClipPlayerNode::stopAllSlots()
 {
     for (int i = 0; i < NUM_SLOTS; ++i)
         stopSlot(i);
+}
+
+void ClipPlayerNode::closeOpenNotes(MidiClip& clip)
+{
+    // Find note-ons without matching note-offs and add note-offs at clip end
+    std::set<int> openNotes; // (channel << 8) | noteNumber
+    for (int e = 0; e < clip.events.getNumEvents(); ++e)
+    {
+        auto& msg = clip.events.getEventPointer(e)->message;
+        int key = (msg.getChannel() << 8) | msg.getNoteNumber();
+        if (msg.isNoteOn())
+            openNotes.insert(key);
+        else if (msg.isNoteOff())
+            openNotes.erase(key);
+    }
+    for (int key : openNotes)
+    {
+        int ch = (key >> 8) & 0xF;
+        int note = key & 0x7F;
+        auto noteOff = juce::MidiMessage::noteOff(ch, note);
+        noteOff.setTimeStamp(clip.lengthInBeats - 0.001);
+        clip.events.addEvent(noteOff);
+    }
+    if (!openNotes.empty())
+        clip.events.sort();
 }
 
 void ClipPlayerNode::killActiveNotes(juce::MidiBuffer& midi, int sampleOffset, bool hard)

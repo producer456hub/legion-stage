@@ -67,6 +67,7 @@ private:
 
     void processClipPlayback(int slotIndex, juce::MidiBuffer& midi, int numSamples);
     void processRecording(const juce::MidiBuffer& incomingMidi, int numSamples);
+    void closeOpenNotes(MidiClip& clip);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ClipPlayerNode)
 };
