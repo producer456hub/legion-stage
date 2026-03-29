@@ -309,12 +309,17 @@ void PluginHost::setSelectedTrack(int index)
 {
     if (index < 0 || index >= NUM_TRACKS) return;
 
-    // Disarm previous track (unless it's lock-armed)
+    // Clean up previous track when switching
     if (selectedTrack != index)
     {
         auto& oldTrack = tracks[static_cast<size_t>(selectedTrack)];
-        if (oldTrack.clipPlayer != nullptr && !oldTrack.clipPlayer->armLocked.load())
-            oldTrack.clipPlayer->armed.store(false);
+        if (oldTrack.clipPlayer != nullptr)
+        {
+            if (!oldTrack.clipPlayer->armLocked.load())
+                oldTrack.clipPlayer->armed.store(false);
+            // Kill any notes from live MIDI input before disconnecting
+            oldTrack.clipPlayer->sendAllNotesOff.store(true);
+        }
     }
 
     selectedTrack = index;

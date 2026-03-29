@@ -18,9 +18,14 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
     int numSamples = buffer.getNumSamples();
 
     // Send all-notes-off if flagged (stop/panic — hard kill)
+    bool skipPlayback = false;
     if (sendAllNotesOff.exchange(false))
     {
         killActiveNotes(midi, 0, true);
+        // Set high so next play detects a "wrap" and does a clean-start skip
+        lastPositionInBeats = 999999.0;
+        wasInsideClip.fill(false);
+        skipPlayback = true;
     }
 
     // Check if we should start recording (not during count-in)
@@ -72,8 +77,8 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
         processRecording(midi, numSamples);
     }
 
-    // Handle playback for all playing clips
-    if (engine.isPlaying())
+    // Handle playback for all playing clips (skip during count-in)
+    if (engine.isPlaying() && !engine.isInCountIn())
     {
         double currentPos = engine.getPositionInBeats();
 
@@ -82,15 +87,18 @@ void ClipPlayerNode::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBu
         if (loopJustWrapped)
         {
             killActiveNotes(midi, 0);
-            // Reset lastPositionInBeats so the first-beat logic works on the wrapped position
             lastPositionInBeats = currentPos - 0.001;
+            skipPlayback = true;
         }
 
-        for (int i = 0; i < NUM_SLOTS; ++i)
+        if (!skipPlayback)
         {
-            if (slots[static_cast<size_t>(i)].state.load() == ClipSlot::Playing)
+            for (int i = 0; i < NUM_SLOTS; ++i)
             {
-                processClipPlayback(i, midi, numSamples);
+                if (slots[static_cast<size_t>(i)].state.load() == ClipSlot::Playing)
+                {
+                    processClipPlayback(i, midi, numSamples);
+                }
             }
         }
 
@@ -142,7 +150,7 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
             continue;
 
         double clipPos = relPos;
-        double prevRelPos = relPos - beatsPerSample;
+        double prevClipPos = relPos - beatsPerSample;
 
         for (int e = 0; e < clip.events.getNumEvents(); ++e)
         {
@@ -151,16 +159,16 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
 
             bool shouldTrigger = false;
 
-            if (prevRelPos < 0.0)
+            if (sample == 0 && relPos < beatsPerSample)
             {
-                // First sample inside the clip — trigger events at or before clipPos
+                // First sample inside the clip — trigger events at beat 0 only once
                 if (eventBeat >= 0.0 && eventBeat <= clipPos + 0.0001)
                     shouldTrigger = true;
             }
-            else
+            else if (prevClipPos >= 0.0)
             {
                 // Normal case: half-open interval (prevClipPos, clipPos]
-                if (eventBeat > prevRelPos && eventBeat <= clipPos + 0.0001)
+                if (eventBeat > prevClipPos && eventBeat <= clipPos + 0.0001)
                     shouldTrigger = true;
             }
 
@@ -183,7 +191,7 @@ void ClipPlayerNode::processRecording(const juce::MidiBuffer& incomingMidi, int 
     if (recordingSlot < 0 || recordingSlot >= NUM_SLOTS) return;
 
     auto& slot = slots[static_cast<size_t>(recordingSlot)];
-    if (slot.clip == nullptr) return;
+    if (slot.clip == nullptr) { recordingSlot = -1; return; }
 
     double bpm = engine.getBpm();
     double beatsPerSample = (bpm / 60.0) / currentSampleRate;
@@ -328,7 +336,7 @@ void ClipPlayerNode::stopAllSlots()
 
 void ClipPlayerNode::killActiveNotes(juce::MidiBuffer& midi, int sampleOffset, bool hard)
 {
-    // Send explicit note-offs for every tracked note — allows release tails
+    // Send explicit note-offs for every tracked note
     for (int key : activePlaybackNotes)
     {
         int ch = (key >> 8) & 0xF;
@@ -337,10 +345,12 @@ void ClipPlayerNode::killActiveNotes(juce::MidiBuffer& midi, int sampleOffset, b
     }
     activePlaybackNotes.clear();
 
-    // Hard kill: also send CC 120 (all sound off) — cuts audio instantly
-    // Only use for stop/panic, NOT for loop wraps
+    // Hard kill: send note-off for ALL possible notes on channel 1
+    // Some plugins ignore CC 120/123, so brute-force every note
     if (hard)
     {
+        for (int note = 0; note < 128; ++note)
+            midi.addEvent(juce::MidiMessage::noteOff(1, note), sampleOffset);
         for (int ch = 1; ch <= 16; ++ch)
         {
             midi.addEvent(juce::MidiMessage::allNotesOff(ch), sampleOffset);

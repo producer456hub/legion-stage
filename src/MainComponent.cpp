@@ -222,22 +222,10 @@ MainComponent::MainComponent()
 
     addAndMakeVisible(panicButton);
     panicButton.onClick = [this] {
+        // Flag all tracks for hard note-off on the audio thread (thread-safe)
         for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
         {
             auto& track = pluginHost.getTrack(t);
-            if (track.plugin != nullptr)
-            {
-                juce::MidiBuffer panic;
-                for (int ch = 1; ch <= 16; ++ch)
-                {
-                    panic.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
-                    panic.addEvent(juce::MidiMessage::allSoundOff(ch), 0);
-                    panic.addEvent(juce::MidiMessage::allControllersOff(ch), 0);
-                }
-                juce::AudioBuffer<float> dummy(2, 64);
-                dummy.clear();
-                track.plugin->processBlock(dummy, panic);
-            }
             if (track.clipPlayer)
                 track.clipPlayer->sendAllNotesOff.store(true);
         }
@@ -875,8 +863,32 @@ void MainComponent::timerCallback()
     if (currentSelected != selectedTrackIndex)
     {
         selectedTrackIndex = currentSelected;
+        closePluginEditor();
         updateTrackDisplay();
         updateStatusLabel();
+
+        // Update plugin selector to show current track's plugin
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.plugin != nullptr)
+        {
+            juce::String pluginName = track.plugin->getName();
+            bool found = false;
+            for (int i = 0; i < pluginDescriptions.size(); ++i)
+            {
+                if (pluginDescriptions[i].name == pluginName)
+                {
+                    pluginSelector.setSelectedId(i + 2, juce::dontSendNotification);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                pluginSelector.setSelectedId(1, juce::dontSendNotification);
+        }
+        else
+        {
+            pluginSelector.setSelectedId(1, juce::dontSendNotification);
+        }
     }
 
 }
@@ -890,7 +902,29 @@ void MainComponent::selectTrack(int index)
     closePluginEditor();
     updateTrackDisplay();
     updateStatusLabel();
-    pluginSelector.setSelectedId(1, juce::dontSendNotification);
+
+    // Show the currently loaded plugin in the selector, or reset to default
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+    if (track.plugin != nullptr)
+    {
+        juce::String pluginName = track.plugin->getName();
+        bool found = false;
+        for (int i = 0; i < pluginDescriptions.size(); ++i)
+        {
+            if (pluginDescriptions[i].name == pluginName)
+            {
+                pluginSelector.setSelectedId(i + 2, juce::dontSendNotification);
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            pluginSelector.setSelectedId(1, juce::dontSendNotification);
+    }
+    else
+    {
+        pluginSelector.setSelectedId(1, juce::dontSendNotification);
+    }
 }
 
 void MainComponent::updateTrackDisplay()
