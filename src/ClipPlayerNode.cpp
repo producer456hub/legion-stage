@@ -146,7 +146,8 @@ void ClipPlayerNode::processClipPlayback(int slotIndex, juce::MidiBuffer& midi, 
         double relPos = beatPos - clipTimelineStart;
 
         // Skip if playhead is before or past the clip
-        if (relPos < 0.0 || relPos >= clipLen)
+        // Use small epsilon past clipLen to catch note-offs at the boundary
+        if (relPos < 0.0 || relPos >= clipLen + 0.01)
             continue;
 
         double clipPos = relPos;
