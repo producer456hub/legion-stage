@@ -50,6 +50,7 @@ target_sources(Sequencer PRIVATE
     src/MilkDropComponent.h
     src/ThemeManager.h
     src/SkillParser.h
+    src/WorkflowGuideWindow.h
     src/TimelineComponent.h
     src/TimelineComponent.cpp
 )
