@@ -11,6 +11,7 @@
 #include "LissajousComponent.h"
 #include "GForceComponent.h"
 #include "MilkDropComponent.h"
+#include "WorkflowGuideWindow.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -104,6 +105,16 @@ private:
     juce::TextButton nextPresetButton { ">>|" };
     juce::TextButton visExitButton { "EXIT" };
     juce::TextButton testNoteButton { "Test Note" };
+
+    // ── Workflow Guide ──
+    juce::TextButton workflowGuideButton { "GUIDE" };
+    std::unique_ptr<WorkflowGuideWindow> workflowGuideWindow;
+    void executeWorkflowAction(const juce::String& actionId,
+                               const juce::StringPairArray& params);
+    void loadWorkflowStage(int stageIndex);
+    juce::String loadSkillFile(int stageIndex);
+    void saveWorkflowGuideState();
+    void restoreWorkflowGuideState();
 
     // MidiInputCallback — intercept SysEx for CI before it goes to collector
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& msg) override;

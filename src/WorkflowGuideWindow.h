@@ -94,10 +94,10 @@ private:
             stageSelector.addItem("3. Shape", 3);
             stageSelector.addItem("4. Extend", 4);
             stageSelector.setSelectedId(1, juce::dontSendNotification);
-            stageSelector.onChange = [this]
+            stageSelector.onChange = [this]()
             {
-                if (owner.onStageChanged)
-                    owner.onStageChanged(stageSelector.getSelectedId() - 1);
+                if (this->owner.onStageChanged)
+                    this->owner.onStageChanged(stageSelector.getSelectedId() - 1);
             };
 
             addAndMakeVisible(viewport);

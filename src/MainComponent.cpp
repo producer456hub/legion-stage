@@ -287,6 +287,28 @@ MainComponent::MainComponent()
         repaint();
     };
 
+    // ── Workflow Guide ──
+    addAndMakeVisible(workflowGuideButton);
+    workflowGuideButton.onClick = [this]
+    {
+        if (!workflowGuideWindow)
+        {
+            workflowGuideWindow = std::make_unique<WorkflowGuideWindow>(
+                [this](const juce::String& id, const juce::StringPairArray& p)
+                {
+                    executeWorkflowAction(id, p);
+                });
+            workflowGuideWindow->onStageChanged = [this](int idx) { loadWorkflowStage(idx); };
+            workflowGuideWindow->applyTheme(themeManager.getColors());
+            restoreWorkflowGuideState();
+            loadWorkflowStage(0);
+        }
+
+        workflowGuideWindow->setVisible(!workflowGuideWindow->isVisible());
+        if (workflowGuideWindow->isVisible())
+            workflowGuideWindow->toFront(true);
+    };
+
     addAndMakeVisible(visSelector);
     visSelector.addItem("Spectrum", 1);
     visSelector.addItem("G-Force", 2);
@@ -548,6 +570,8 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    saveWorkflowGuideState();
+    workflowGuideWindow.reset();
     pluginHost.spectrumDisplay = nullptr;
     pluginHost.gforceDisplay = nullptr;
     pluginHost.milkdropDisplay = nullptr;
@@ -2151,4 +2175,143 @@ void MainComponent::applyMidiCC(const MidiMapping& mapping, int value)
         }
         default: break;
     }
+}
+
+// ── Workflow Guide ──────────────────────────────────────────────────────────
+
+juce::String MainComponent::loadSkillFile(int stageIndex)
+{
+    const char* filenames[] = { "seed.md", "layer.md", "shape.md", "extend.md" };
+    if (stageIndex < 0 || stageIndex > 3) return {};
+
+    // Try loading from the skills directory next to the executable
+    auto appDir = juce::File::getSpecialLocation(juce::File::currentApplicationFile)
+                      .getParentDirectory();
+    auto skillFile = appDir.getChildFile("assets")
+                          .getChildFile("skills")
+                          .getChildFile("session-workflow")
+                          .getChildFile(filenames[stageIndex]);
+
+    // Fallback: try from the source tree (development mode)
+    if (!skillFile.existsAsFile())
+    {
+        skillFile = juce::File("C:/dev/sequencer/assets/skills/session-workflow")
+                        .getChildFile(filenames[stageIndex]);
+    }
+
+    if (skillFile.existsAsFile())
+        return skillFile.loadFileAsString();
+
+    return "## Skill file not found\n\nExpected: " + skillFile.getFullPathName();
+}
+
+void MainComponent::loadWorkflowStage(int stageIndex)
+{
+    if (!workflowGuideWindow) return;
+    auto markdown = loadSkillFile(stageIndex);
+    workflowGuideWindow->loadSkillFromString(markdown);
+}
+
+void MainComponent::executeWorkflowAction(const juce::String& actionId,
+                                           const juce::StringPairArray& params)
+{
+    auto& eng = pluginHost.getEngine();
+
+    if (actionId == "create_track")
+    {
+        // Select the next empty track (or the last one)
+        for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+        {
+            auto& track = pluginHost.getTrack(t);
+            if (track.plugin == nullptr)
+            {
+                selectTrack(t);
+                statusLabel.setText("Selected track " + juce::String(t + 1), juce::dontSendNotification);
+                return;
+            }
+        }
+        statusLabel.setText("All tracks in use", juce::dontSendNotification);
+    }
+    else if (actionId == "set_loop")
+    {
+        auto barsStr = params["bars"];  // e.g. "1-4"
+        auto parts = juce::StringArray::fromTokens(barsStr, "-", "");
+        if (parts.size() == 2)
+        {
+            double startBar = parts[0].getDoubleValue() - 1.0;  // 0-based
+            double endBar = parts[1].getDoubleValue();
+            eng.setLoopRegion(startBar * 4.0, endBar * 4.0);  // 4 beats per bar
+            if (!eng.isLoopEnabled()) eng.toggleLoop();
+            loopButton.setToggleState(true, juce::dontSendNotification);
+            if (timelineComponent) timelineComponent->repaint();
+            statusLabel.setText("Loop: bars " + barsStr, juce::dontSendNotification);
+        }
+    }
+    else if (actionId == "clear_loop")
+    {
+        eng.clearLoopRegion();
+        if (eng.isLoopEnabled()) eng.toggleLoop();
+        loopButton.setToggleState(false, juce::dontSendNotification);
+        if (timelineComponent) timelineComponent->repaint();
+        statusLabel.setText("Loop cleared", juce::dontSendNotification);
+    }
+    else if (actionId == "set_bpm")
+    {
+        double bpm = params["value"].getDoubleValue();
+        if (bpm >= 20.0 && bpm <= 300.0)
+        {
+            eng.setBpm(bpm);
+            bpmLabel.setText(juce::String((int)bpm) + " BPM", juce::dontSendNotification);
+            statusLabel.setText("BPM: " + juce::String((int)bpm), juce::dontSendNotification);
+        }
+    }
+    else if (actionId == "select_track")
+    {
+        int idx = params["index"].getIntValue();
+        if (idx >= 0 && idx < PluginHost::NUM_TRACKS)
+            selectTrack(idx);
+    }
+    else if (actionId == "start_recording")
+    {
+        if (!eng.isRecording()) eng.toggleRecord();
+        if (!eng.isPlaying()) eng.play();
+        recordButton.setToggleState(eng.isRecording(), juce::dontSendNotification);
+    }
+    else if (actionId == "start_playback")
+    {
+        if (!eng.isPlaying()) eng.play();
+    }
+    else if (actionId == "stop")
+    {
+        if (eng.isPlaying())
+        {
+            eng.stop();
+            for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+            {
+                auto* cp = pluginHost.getTrack(t).clipPlayer;
+                if (cp) cp->sendAllNotesOff.store(true);
+            }
+        }
+        if (timelineComponent) timelineComponent->repaint();
+    }
+}
+
+void MainComponent::saveWorkflowGuideState()
+{
+    if (!workflowGuideWindow) return;
+    auto configDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                         .getChildFile("Legion Stage");
+    configDir.createDirectory();
+    auto configFile = configDir.getChildFile("workflow-guide-config.txt");
+    configFile.replaceWithText(workflowGuideWindow->getStateAsString());
+}
+
+void MainComponent::restoreWorkflowGuideState()
+{
+    if (!workflowGuideWindow) return;
+    auto configFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                          .getChildFile("Legion Stage")
+                          .getChildFile("workflow-guide-config.txt");
+    if (configFile.existsAsFile())
+        workflowGuideWindow->restoreFromString(configFile.loadFileAsString());
 }
