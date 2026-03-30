@@ -1646,6 +1646,7 @@ void MainComponent::resized()
         themeSelector.setVisible(false);
         audioSettingsButton.setVisible(false);
         midi2Button.setVisible(false);
+        workflowGuideButton.setVisible(false);
         pluginSelector.setVisible(false);
         openEditorButton.setVisible(false);
         midiInputSelector.setVisible(false);
@@ -1683,6 +1684,7 @@ void MainComponent::resized()
     themeSelector.setVisible(true);
     audioSettingsButton.setVisible(true);
     midi2Button.setVisible(true);
+    workflowGuideButton.setVisible(true);
     pluginSelector.setVisible(true);
     openEditorButton.setVisible(true);
     midiInputSelector.setVisible(true);
@@ -1742,6 +1744,8 @@ void MainComponent::resized()
     visSelector.setBounds(toolbar.removeFromLeft(80));
     toolbar.removeFromLeft(3);
     midi2Button.setBounds(toolbar.removeFromLeft(44));
+    toolbar.removeFromLeft(3);
+    workflowGuideButton.setBounds(toolbar.removeFromLeft(60));
 
     // ── Right Panel ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
@@ -1985,9 +1989,13 @@ void MainComponent::applyThemeToControls()
     loadButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnLoad));
     undoButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnUndoRedo));
     redoButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnUndoRedo));
+    workflowGuideButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
 
     for (int i = 0; i < NUM_FX_SLOTS; ++i)
         fxEditorButtons[i]->setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
+
+    if (workflowGuideWindow)
+        workflowGuideWindow->applyTheme(c);
 
     repaint();
 }
