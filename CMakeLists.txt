@@ -79,6 +79,6 @@ target_link_libraries(Sequencer PRIVATE
     juce::juce_opengl
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/projectm/build/src/libprojectM/projectM-4.lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/projectm/build/src/libprojectM/$<CONFIG>/projectM-4.lib
     opengl32
 )
