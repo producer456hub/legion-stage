@@ -49,6 +49,7 @@ target_sources(Sequencer PRIVATE
     src/GForceComponent.h
     src/MilkDropComponent.h
     src/ThemeManager.h
+    src/SkillParser.h
     src/TimelineComponent.h
     src/TimelineComponent.cpp
 )
