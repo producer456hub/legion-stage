@@ -39,6 +39,45 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginEditorWindow)
 };
 
+// Multi-line OLED info display for beat/status
+class OledInfoPanel : public juce::Component
+{
+public:
+    void setLines(const juce::String& line1, const juce::String& line2, const juce::String& line3 = {})
+    {
+        lines[0] = line1; lines[1] = line2; lines[2] = line3;
+        repaint();
+    }
+    void setColors(juce::Colour text, juce::Colour bg) { textCol = text; bgCol = bg; repaint(); }
+    void setFontName(const juce::String& name) { fontName = name; repaint(); }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto bounds = getLocalBounds().toFloat();
+        g.setColour(bgCol);
+        g.fillRoundedRectangle(bounds, 4.0f);
+
+        int numLines = lines[2].isNotEmpty() ? 3 : (lines[1].isNotEmpty() ? 2 : 1);
+        float lineH = bounds.getHeight() / static_cast<float>(numLines);
+        float fontSize = juce::jmin(lineH * 0.75f, 13.0f);
+
+        g.setFont(juce::Font(fontName, fontSize, juce::Font::bold));
+        for (int i = 0; i < numLines; ++i)
+        {
+            auto lineRect = bounds.removeFromTop(lineH).reduced(4.0f, 0.0f);
+            // First line (beat) brighter, others dimmer
+            g.setColour(i == 0 ? textCol : textCol.withAlpha(0.65f));
+            g.drawText(lines[i], lineRect, juce::Justification::centredLeft);
+        }
+    }
+
+private:
+    juce::String lines[3];
+    juce::Colour textCol { 0xffb8d8f0 };
+    juce::Colour bgCol { 0xff000000 };
+    juce::String fontName { "Consolas" };
+};
+
 class MainComponent : public juce::Component, public juce::Timer, public juce::MidiInputCallback
 {
 public:
@@ -77,10 +116,40 @@ private:
     juce::TextButton playButton { "PLAY" };
     juce::TextButton stopButton { "STOP" };
     juce::TextButton metronomeButton { "MET" };
-    juce::TextButton bpmDownButton { "-" };
+    juce::TextButton bpmDownButton { "-" };  // kept for logic, hidden
     juce::Label bpmLabel;
-    juce::TextButton bpmUpButton { "+" };
-    juce::Label beatLabel;
+    juce::TextButton bpmUpButton { "+" };   // kept for logic, hidden
+    // Combined up/down arrow button for BPM
+    class BpmArrowButton : public juce::Component
+    {
+    public:
+        std::function<void()> onUp, onDown;
+        void paint(juce::Graphics& g) override
+        {
+            auto bounds = getLocalBounds().toFloat();
+            g.setColour(juce::Colour(0xff080808));
+            g.fillRoundedRectangle(bounds.reduced(1.0f), 4.0f);
+            g.setColour(juce::Colour(0xff3a3530));
+            g.drawRoundedRectangle(bounds.reduced(1.0f), 4.0f, 1.0f);
+            float midY = bounds.getCentreY();
+            float cx = bounds.getCentreX();
+            // Up arrow
+            juce::Path up;
+            up.addTriangle(cx - 6, midY - 2, cx + 6, midY - 2, cx, midY - 10);
+            g.setColour(juce::Colour(0xffb8d8f0));
+            g.fillPath(up);
+            // Down arrow
+            juce::Path down;
+            down.addTriangle(cx - 6, midY + 2, cx + 6, midY + 2, cx, midY + 10);
+            g.fillPath(down);
+        }
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            if (e.y < getHeight() / 2) { if (onUp) onUp(); }
+            else { if (onDown) onDown(); }
+        }
+    } bpmArrowButton;
+    OledInfoPanel beatPanel;
     juce::TextButton tapTempoButton { "TAP" };
     juce::Array<double> tapTimes;
     static constexpr int maxTaps = 8;
@@ -236,6 +305,9 @@ private:
 
     // ── Bottom Bar ──
     juce::Label statusLabel;
+    juce::String cachedStatusText;
+    juce::String cachedStatusLine1;  // MIDI input info
+    juce::String cachedStatusLine2;  // Audio device info
 
     // ── Timeline (arrangement view) ──
     std::unique_ptr<TimelineComponent> timelineComponent;

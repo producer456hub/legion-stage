@@ -118,7 +118,7 @@ MainComponent::MainComponent()
         pluginHost.getEngine().toggleMetronome();
     };
 
-    addAndMakeVisible(bpmDownButton);
+    bpmDownButton.setVisible(false);
     bpmDownButton.onClick = [this] {
         double bpm = juce::jmax(20.0, pluginHost.getEngine().getBpm() - 1.0);
         pluginHost.getEngine().setBpm(bpm);
@@ -129,14 +129,18 @@ MainComponent::MainComponent()
     bpmLabel.setText("120 BPM", juce::dontSendNotification);
     bpmLabel.setJustificationType(juce::Justification::centred);
 
-    addAndMakeVisible(bpmUpButton);
+    bpmUpButton.setVisible(false);
     bpmUpButton.onClick = [this] {
         double bpm = juce::jmin(300.0, pluginHost.getEngine().getBpm() + 1.0);
         pluginHost.getEngine().setBpm(bpm);
         bpmLabel.setText(juce::String(static_cast<int>(bpm)) + " BPM", juce::dontSendNotification);
     };
 
-    addAndMakeVisible(beatLabel);
+    addAndMakeVisible(bpmArrowButton);
+    bpmArrowButton.onUp = [this] { bpmUpButton.triggerClick(); };
+    bpmArrowButton.onDown = [this] { bpmDownButton.triggerClick(); };
+
+    addAndMakeVisible(beatPanel);
 
     addAndMakeVisible(tapTempoButton);
     tapTempoButton.onClick = [this] {
@@ -245,7 +249,8 @@ MainComponent::MainComponent()
     addAndMakeVisible(scrollRightButton);
     scrollRightButton.onClick = [this] { if (timelineComponent) timelineComponent->scrollRight(); };
 
-    addAndMakeVisible(editClipButton);
+    addChildComponent(editClipButton);  // hidden — double-tap clip to edit
+    editClipButton.setVisible(false);
     editClipButton.onClick = [this] {
         if (timelineComponent)
         {
@@ -951,15 +956,19 @@ void MainComponent::timerCallback()
 {
     auto& eng = pluginHost.getEngine();
 
-    if (eng.isInCountIn())
     {
-        int barsLeft = static_cast<int>(std::ceil(eng.getCountInBeatsRemaining() / 4.0));
-        beatLabel.setText("Count: -" + juce::String(barsLeft), juce::dontSendNotification);
-    }
-    else
-    {
-        double beat = eng.getPositionInBeats();
-        beatLabel.setText("Beat: " + juce::String(beat, 1), juce::dontSendNotification);
+        juce::String beatText;
+        if (eng.isInCountIn())
+        {
+            int barsLeft = static_cast<int>(std::ceil(eng.getCountInBeatsRemaining() / 4.0));
+            beatText = "Count: -" + juce::String(barsLeft);
+        }
+        else
+        {
+            double beat = eng.getPositionInBeats();
+            beatText = "Beat: " + juce::String(beat, 1);
+        }
+        beatPanel.setLines(beatText, cachedStatusLine1, cachedStatusLine2);
     }
 
     // Flash record button hazard orange when armed
@@ -1587,14 +1596,22 @@ void MainComponent::showSettingsMenu()
 void MainComponent::updateStatusLabel()
 {
     juce::String text;
+    cachedStatusLine1 = {};
+    cachedStatusLine2 = {};
+
     if (useComputerKeyboard)
-        text += "KB Oct " + juce::String(computerKeyboardOctave) + " | ";
+        cachedStatusLine1 = "KB Oct " + juce::String(computerKeyboardOctave);
     else if (currentMidiDeviceId.isNotEmpty())
         for (const auto& d : midiDevices)
-            if (d.identifier == currentMidiDeviceId) { text += d.name + " | "; break; }
+            if (d.identifier == currentMidiDeviceId) { cachedStatusLine1 = d.name; break; }
 
     if (auto* dev = deviceManager.getCurrentAudioDevice())
-        text += dev->getName() + " | " + juce::String(dev->getCurrentSampleRate(), 0) + " Hz";
+        cachedStatusLine2 = dev->getName() + " " + juce::String(dev->getCurrentSampleRate(), 0) + " Hz";
+
+    text = cachedStatusLine1;
+    if (text.isNotEmpty() && cachedStatusLine2.isNotEmpty()) text += " | ";
+    text += cachedStatusLine2;
+    cachedStatusText = text;
     statusLabel.setText(text, juce::dontSendNotification);
 }
 
@@ -2165,9 +2182,8 @@ void MainComponent::resized()
 
     // Status/beat labels on the far right (not square buttons)
     auto rightLabels = topBar;
-    beatLabel.setBounds(rightLabels.removeFromRight(100));
-    rightLabels.removeFromRight(gap);
-    statusLabel.setBounds(rightLabels.removeFromRight(juce::jmin(120, rightLabels.getWidth() / 6)));
+    beatPanel.setBounds(rightLabels.removeFromRight(280));
+    statusLabel.setBounds(0, 0, 0, 0);  // hidden — info merged into beatPanel
     int labelsW = fullBarW - rightLabels.getWidth();  // space consumed by labels
 
     zoomOutButton.setVisible(false);
@@ -2323,7 +2339,6 @@ void MainComponent::resized()
         deleteClipButton.setVisible(false);
         duplicateClipButton.setVisible(false);
         splitClipButton.setVisible(false);
-        editClipButton.setVisible(false);
         quantizeButton.setVisible(false);
         gridSelector.setVisible(false);
         saveButton.setVisible(false);
@@ -2360,7 +2375,6 @@ void MainComponent::resized()
     deleteClipButton.setVisible(true);
     duplicateClipButton.setVisible(true);
     splitClipButton.setVisible(true);
-    editClipButton.setVisible(true);
     quantizeButton.setVisible(true);
     gridSelector.setVisible(true);
     saveButton.setVisible(true);
@@ -2411,8 +2425,6 @@ void MainComponent::resized()
     toolbar.removeFromLeft(3);
     splitClipButton.setBounds(toolbar.removeFromLeft(65));
     toolbar.removeFromLeft(2);
-    editClipButton.setBounds(toolbar.removeFromLeft(90));
-    toolbar.removeFromLeft(2);
     quantizeButton.setBounds(toolbar.removeFromLeft(82));
     toolbar.removeFromLeft(4);
     gridSelector.setBounds(toolbar.removeFromLeft(75));
@@ -2428,11 +2440,9 @@ void MainComponent::resized()
     // Pack remaining controls at the right end of the toolbar
     tapTempoButton.setBounds(toolbar.removeFromRight(60));
     toolbar.removeFromRight(3);
-    bpmUpButton.setBounds(toolbar.removeFromRight(38));
+    bpmArrowButton.setBounds(toolbar.removeFromRight(28));
     toolbar.removeFromRight(2);
     bpmLabel.setBounds(toolbar.removeFromRight(80));
-    toolbar.removeFromRight(2);
-    bpmDownButton.setBounds(toolbar.removeFromRight(38));
     toolbar.removeFromRight(6);
     midi2Button.setBounds(toolbar.removeFromRight(42));
     toolbar.removeFromRight(2);
@@ -2945,9 +2955,8 @@ void MainComponent::applyThemeToControls()
     // Labels
     trackNameLabel.setColour(juce::Label::textColourId, juce::Colour(c.amber));
     trackNameLabel.setFont(juce::Font(fontName, 16.0f, juce::Font::bold));
-    beatLabel.setFont(juce::Font(fontName, 16.0f, juce::Font::bold));
-    beatLabel.setColour(juce::Label::textColourId, juce::Colour(c.lcdText));
-    beatLabel.setColour(juce::Label::backgroundColourId, juce::Colour(c.lcdBg));
+    beatPanel.setFontName(fontName);
+    beatPanel.setColors(juce::Colour(c.lcdText), juce::Colour(c.lcdBg));
     statusLabel.setColour(juce::Label::textColourId, juce::Colour(c.textSecondary));
     trackInfoLabel.setColour(juce::Label::textColourId, juce::Colour(c.textSecondary));
 
