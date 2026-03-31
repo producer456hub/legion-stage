@@ -298,10 +298,28 @@ MainComponent::MainComponent()
             });
     };
 
+    // VIS button cycles: off -> fullscreen w/ controls -> projector (no chrome) -> off
     addAndMakeVisible(fullscreenButton);
-    fullscreenButton.setClickingTogglesState(true);
     fullscreenButton.onClick = [this] {
-        visualizerFullScreen = fullscreenButton.getToggleState();
+        if (!visualizerFullScreen)
+        {
+            // Off -> fullscreen with controls
+            visualizerFullScreen = true;
+            projectorMode = false;
+        }
+        else if (!projectorMode)
+        {
+            // Fullscreen -> projector mode
+            projectorMode = true;
+        }
+        else
+        {
+            // Projector -> off
+            visualizerFullScreen = false;
+            projectorMode = false;
+        }
+        fullscreenButton.setToggleState(visualizerFullScreen, juce::dontSendNotification);
+        projectorButton.setToggleState(projectorMode, juce::dontSendNotification);
         resized();
         repaint();
     };
@@ -332,15 +350,9 @@ MainComponent::MainComponent()
         grabKeyboardFocus();
     };
 
-    addAndMakeVisible(projectorButton);
+    // projectorButton kept for internal state but hidden from toolbar
     projectorButton.setClickingTogglesState(true);
-    projectorButton.onClick = [this] {
-        projectorMode = projectorButton.getToggleState();
-        if (projectorMode)
-            visualizerFullScreen = true;
-        resized();
-        repaint();
-    };
+    projectorButton.setVisible(false);
 
     // ── Geiss control buttons ──
     addAndMakeVisible(geissWaveBtn);
@@ -572,6 +584,141 @@ MainComponent::MainComponent()
     };
 
     testNoteButton.setVisible(false);
+
+    // ── MIDI Capture (always listening — press to retrieve) ──
+    addAndMakeVisible(captureButton);
+    captureButton.setEnabled(false);  // greyed out until data exists
+    captureButton.onClick = [this] {
+        if (captureBuffer.hasContent())
+            retrieveCapture();
+    };
+
+    // ── Gamepad (Legion Go) ──
+    addAndMakeVisible(goButton);
+    goButton.setClickingTogglesState(true);
+    goButton.onClick = [this] {
+        bool on = goButton.getToggleState();
+        gamepadHandler.setEnabled(on);
+        gamepadOverlay.setVisible(on);
+        if (on)
+        {
+            gamepadOverlay.setMode(gamepadHandler.getMode());
+            gamepadOverlay.setConnected(gamepadHandler.isConnected());
+        }
+        repaint();
+    };
+
+    addChildComponent(gamepadOverlay);  // hidden by default
+
+    // Gamepad note callbacks — same path as touch piano
+    gamepadHandler.onNoteOn = [this](int note, float velocity) {
+        auto msg = juce::MidiMessage::noteOn(1, note, velocity);
+        msg.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
+        pluginHost.getMidiCollector().addMessageToQueue(msg);
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.clipPlayer && track.clipPlayer->armed.load())
+            captureBuffer.addMessage(msg, selectedTrackIndex);
+    };
+    gamepadHandler.onNoteOff = [this](int note) {
+        sendNoteOff(note);
+    };
+
+    // Gamepad virtual MIDI — feeds into MIDI learn pipeline
+    gamepadHandler.onMidiMessage = [this](const juce::MidiMessage& msg) {
+        if (midiLearnActive && midiLearnTarget != MidiTarget::None && msg.isController())
+        {
+            int ch  = msg.getChannel();
+            int cc  = msg.getControllerNumber();
+            int val = msg.getControllerValue();
+            if (val > 10)  // threshold to avoid accidental learn from noise
+                processMidiLearnCC(ch, cc, val);
+            return;
+        }
+        // Apply existing gamepad CC mappings
+        if (msg.isController())
+        {
+            for (auto& mapping : midiMappings)
+            {
+                if (mapping.channel == msg.getChannel() && mapping.ccNumber == msg.getControllerNumber())
+                    applyMidiCC(mapping, msg.getControllerValue());
+            }
+        }
+        // Pass pitch bend and mod wheel directly to the plugin
+        if (msg.isPitchWheel() || (msg.isController() && msg.getControllerNumber() == 1))
+            pluginHost.getMidiCollector().addMessageToQueue(msg);
+    };
+
+    // Navigation callbacks
+    gamepadHandler.onTrackSelect = [this](int dir) {
+        selectTrack(juce::jlimit(0, PluginHost::NUM_TRACKS - 1, selectedTrackIndex + dir));
+    };
+    gamepadHandler.onScroll = [this](float dx, float /*dy*/) {
+        if (timelineComponent)
+        {
+            if (dx < -0.2f) timelineComponent->scrollLeft();
+            else if (dx > 0.2f) timelineComponent->scrollRight();
+        }
+    };
+    gamepadHandler.onZoom = [this](float factor) {
+        if (timelineComponent)
+        {
+            if (factor > 0) timelineComponent->zoomIn();
+            else if (factor < 0) timelineComponent->zoomOut();
+        }
+    };
+
+    // Transport callbacks
+    gamepadHandler.onPlay = [this] {
+        pluginHost.getEngine().play();
+    };
+    gamepadHandler.onStop = [this] {
+        pluginHost.getEngine().stop();
+    };
+    gamepadHandler.onRecord = [this] {
+        pluginHost.getEngine().toggleRecord();
+    };
+    gamepadHandler.onUndo = [this] {
+        undoButton.triggerClick();
+    };
+    gamepadHandler.onRedo = [this] {
+        redoButton.triggerClick();
+    };
+
+    // Right controller: visualizer callbacks
+    gamepadHandler.onVisCycleType = [this] {
+        currentVisMode = (currentVisMode + 1) % 5;
+        visSelector.setSelectedId(currentVisMode + 1, juce::sendNotification);
+    };
+    gamepadHandler.onVisToggleFullscreen = [this] {
+        fullscreenButton.triggerClick();  // uses the same cycle logic
+    };
+    // Geiss
+    gamepadHandler.onGeissCycleWave    = [this] { geissDisplay.cycleWaveform(); };
+    gamepadHandler.onGeissCyclePalette = [this] { geissDisplay.cyclePalette(); };
+    gamepadHandler.onGeissNewScene     = [this] { geissDisplay.newRandomScene(); };
+    gamepadHandler.onGeissWaveScale    = [this](float delta) {
+        if (delta > 0) geissDisplay.waveScaleUp();
+        else           geissDisplay.waveScaleDown();
+    };
+    gamepadHandler.onGeissToggleWarp      = [this] { geissDisplay.toggleWarpLock(); };
+    gamepadHandler.onGeissToggleAutoPilot = [this] { geissDisplay.toggleAutoPilot(); };
+    // ProjectM
+    gamepadHandler.onPMNext       = [this] { projectMDisplay.nextScene(); };
+    gamepadHandler.onPMPrev       = [this] { projectMDisplay.prevScene(); };
+    gamepadHandler.onPMRandom     = [this] { projectMDisplay.randomScene(); };
+    gamepadHandler.onPMToggleLock = [this] { projectMDisplay.toggleLock(); };
+    // G-Force
+    gamepadHandler.onGFMoreRibbons  = [this] { gforceDisplay.moreRibbons(); };
+    gamepadHandler.onGFFewerRibbons = [this] { gforceDisplay.fewerRibbons(); };
+    gamepadHandler.onGFCycleTrail   = [this] { gforceDisplay.cycleTrail(); };
+    // Spectrum
+    gamepadHandler.onSpecCycleDecay = [this] { spectrumDisplay.cycleDecay(); };
+    gamepadHandler.onSpecSensUp     = [this] { spectrumDisplay.sensitivityUp(); };
+    gamepadHandler.onSpecSensDown   = [this] { spectrumDisplay.sensitivityDown(); };
+    // Lissajous
+    gamepadHandler.onLissZoomIn    = [this] { lissajousDisplay.zoomIn(); };
+    gamepadHandler.onLissZoomOut   = [this] { lissajousDisplay.zoomOut(); };
+    gamepadHandler.onLissCycleDots = [this] { lissajousDisplay.cycleDots(); };
 
     // ── Touch Piano ──
     addChildComponent(touchPiano);  // hidden by default
@@ -842,6 +989,21 @@ void MainComponent::timerCallback()
         panicButton.setToggleState(now < panicAnimEndTime, juce::dontSendNotification);
     }
     panicButton.repaint();
+
+    // Capture button: greyed out when no data, active when data ready
+    {
+        bool hasData = captureBuffer.hasContent();
+        captureButton.setEnabled(hasData);
+    }
+
+    // Update gamepad overlay
+    if (gamepadHandler.isEnabled())
+    {
+        gamepadHandler.setVisMode(currentVisMode);
+        gamepadOverlay.setMode(gamepadHandler.getMode());
+        gamepadOverlay.setConnected(gamepadHandler.isConnected());
+        gamepadOverlay.setVisMode(currentVisMode);
+    }
 
     // Auto-snapshot when recording stops (detect transition)
     static bool wasRecording = false;
@@ -1349,6 +1511,14 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
 
     // Forward all MIDI to the collector for audio processing
     pluginHost.getMidiCollector().addMessageToQueue(msg);
+
+    // Feed into capture buffer (always listening on armed tracks)
+    if (msg.isNoteOnOrOff())
+    {
+        auto& track = pluginHost.getTrack(selectedTrackIndex);
+        if (track.clipPlayer && track.clipPlayer->armed.load())
+            captureBuffer.addMessage(msg, selectedTrackIndex);
+    }
 }
 
 void MainComponent::disableCurrentMidiDevice()
@@ -1919,28 +2089,28 @@ void MainComponent::paint(juce::Graphics& g)
         {
             // Custom top bar (e.g. wood grain)
             int sidePW = lnf->getSidePanelWidth();
-            lnf->drawTopBarBackground(g, sidePW, 0, getWidth() - sidePW * 2, 80);
+            lnf->drawTopBarBackground(g, sidePW, 0, getWidth() - sidePW * 2, 100);
         }
         else
         {
             g.setColour(juce::Colour(c.bodyLight));
-            g.fillRect(0, 0, getWidth(), 80);
+            g.fillRect(0, 0, getWidth(), 100);
         }
     }
     else
     {
         g.setColour(juce::Colour(c.bodyLight));
-        g.fillRect(0, 0, getWidth(), 80);
+        g.fillRect(0, 0, getWidth(), 100);
     }
 
     // Toolbar background
     g.setColour(juce::Colour(c.bodyDark));
-    g.fillRect(0, 80, getWidth(), 65);
+    g.fillRect(0, 100, getWidth(), 85);
 
     // Panel dividers (stop at right panel edge)
     g.setColour(juce::Colour(c.border));
-    g.drawHorizontalLine(80, 0, static_cast<float>(getWidth() - 180));
-    g.drawHorizontalLine(145, 0, static_cast<float>(getWidth() - 180));
+    g.drawHorizontalLine(100, 0, static_cast<float>(getWidth() - 180));
+    g.drawHorizontalLine(185, 0, static_cast<float>(getWidth() - 180));
 
     // Accent stripe at top
     g.setColour(juce::Colour(c.accentStripe));
@@ -1971,48 +2141,55 @@ void MainComponent::resized()
         }
     }
 
-    int topBarH = 80;
+    int topBarH = 100;
     int bottomBarH = 45;
     int rightPanelW = 180;
 
-    // ── Top Bar ──
-    auto topBar = area.removeFromTop(topBarH).reduced(4, 10);
+    // ── Top Bar — transport centered on full width ──
+    auto topBar = area.removeFromTop(topBarH).reduced(4, 8);
+    int fullBarX = topBar.getX();
+    int fullBarW = topBar.getWidth();
+    int barY = topBar.getY();
+    int barH = topBar.getHeight();
 
-    midiLearnButton.setBounds(topBar.removeFromLeft(65));
-    topBar.removeFromLeft(4);
-    trackNameLabel.setBounds(topBar.removeFromLeft(180));
-    topBar.removeFromLeft(6);
+    // Center section first — transport (STOP, PLAY, REC, MET, COUNT-IN, LOOP)
+    int transportW = 75 + 3 + 80 + 3 + 80 + 3 + 60 + 3 + 90 + 3 + 72;
+    int tx = fullBarX + (fullBarW - transportW) / 2;
 
-    recordButton.setBounds(topBar.removeFromLeft(65));
-    topBar.removeFromLeft(3);
-    playButton.setBounds(topBar.removeFromLeft(65));
-    topBar.removeFromLeft(3);
-    stopButton.setBounds(topBar.removeFromLeft(60));
-    topBar.removeFromLeft(3);
-    metronomeButton.setBounds(topBar.removeFromLeft(50));
-    topBar.removeFromLeft(3);
-    countInButton.setBounds(topBar.removeFromLeft(80));
-    topBar.removeFromLeft(3);
-    loopButton.setBounds(topBar.removeFromLeft(60));
-    topBar.removeFromLeft(3);
-    panicButton.setBounds(topBar.removeFromLeft(65));
-    topBar.removeFromLeft(3);
-    pianoToggleButton.setBounds(topBar.removeFromLeft(50));
-    topBar.removeFromLeft(3);
-    mixerButton.setBounds(topBar.removeFromLeft(42));
-    topBar.removeFromLeft(4);
-    scrollLeftButton.setBounds(topBar.removeFromLeft(40));
-    topBar.removeFromLeft(2);
-    scrollRightButton.setBounds(topBar.removeFromLeft(40));
-    topBar.removeFromLeft(3);
-    zoomOutButton.setBounds(topBar.removeFromLeft(50));
-    topBar.removeFromLeft(2);
-    zoomInButton.setBounds(topBar.removeFromLeft(50));
-    topBar.removeFromLeft(4);
-    statusLabel.setBounds(topBar.removeFromLeft(juce::jmin(180, topBar.getWidth() / 2)));
-    topBar.removeFromLeft(4);
+    stopButton.setBounds(tx, barY, 75, barH);       tx += 75 + 3;
+    playButton.setBounds(tx, barY, 80, barH);        tx += 80 + 3;
+    recordButton.setBounds(tx, barY, 80, barH);      tx += 80 + 3;
+    metronomeButton.setBounds(tx, barY, 60, barH);   tx += 60 + 3;
+    countInButton.setBounds(tx, barY, 90, barH);     tx += 90 + 3;
+    loopButton.setBounds(tx, barY, 72, barH);
 
-    beatLabel.setBounds(topBar.removeFromRight(100));
+    // Left section — pack from left edge
+    auto leftBar = topBar;
+    midiLearnButton.setBounds(leftBar.removeFromLeft(70));
+    leftBar.removeFromLeft(3);
+    trackNameLabel.setBounds(leftBar.removeFromLeft(140));
+
+    // Right section — pack from right edge
+    auto rightBar = topBar;
+    beatLabel.setBounds(rightBar.removeFromRight(100));
+    rightBar.removeFromRight(3);
+    statusLabel.setBounds(rightBar.removeFromRight(juce::jmin(140, rightBar.getWidth() / 5)));
+    rightBar.removeFromRight(3);
+    zoomOutButton.setVisible(false);
+    zoomInButton.setVisible(false);
+    scrollRightButton.setBounds(rightBar.removeFromRight(40));
+    rightBar.removeFromRight(2);
+    scrollLeftButton.setBounds(rightBar.removeFromRight(40));
+    rightBar.removeFromRight(3);
+    captureButton.setBounds(rightBar.removeFromRight(58));
+    rightBar.removeFromRight(3);
+    goButton.setBounds(rightBar.removeFromRight(46));
+    rightBar.removeFromRight(3);
+    mixerButton.setBounds(rightBar.removeFromRight(46));
+    rightBar.removeFromRight(3);
+    pianoToggleButton.setBounds(rightBar.removeFromRight(52));
+    rightBar.removeFromRight(3);
+    panicButton.setBounds(rightBar.removeFromRight(65));
 
     // ── Fullscreen Visualizer Mode ──
     if (visualizerFullScreen)
@@ -2048,8 +2225,7 @@ void MainComponent::resized()
             visSelector.setBounds(controlBar.removeFromLeft(90));
             visSelector.setVisible(true);
             controlBar.removeFromLeft(6);
-            projectorButton.setBounds(controlBar.removeFromLeft(50));
-            projectorButton.setVisible(true);
+            projectorButton.setVisible(false);
 
             // Visualizer controls in fullscreen control bar
             controlBar.removeFromLeft(10);
@@ -2207,56 +2383,55 @@ void MainComponent::resized()
     geissDisplay.setVisible(currentVisMode == 3);
     projectMDisplay.setVisible(currentVisMode == 4);
     visExitButton.setVisible(false);
-    projectorButton.setVisible(true);
+    projectorButton.setVisible(false);
     visSelector.setVisible(true);
     fullscreenButton.setVisible(true);
     midi2Button.setVisible(true);
     setVisControlsVisible();
 
     // ── Edit Toolbar ──
-    auto toolbar = area.removeFromTop(65).reduced(4, 4);
-    newClipButton.setBounds(toolbar.removeFromLeft(95));
+    auto toolbar = area.removeFromTop(85).reduced(4, 4);
+    newClipButton.setBounds(toolbar.removeFromLeft(110));
     toolbar.removeFromLeft(3);
-    deleteClipButton.setBounds(toolbar.removeFromLeft(80));
+    deleteClipButton.setBounds(toolbar.removeFromLeft(95));
     toolbar.removeFromLeft(3);
-    duplicateClipButton.setBounds(toolbar.removeFromLeft(95));
+    duplicateClipButton.setBounds(toolbar.removeFromLeft(110));
     toolbar.removeFromLeft(3);
-    splitClipButton.setBounds(toolbar.removeFromLeft(55));
+    splitClipButton.setBounds(toolbar.removeFromLeft(65));
     toolbar.removeFromLeft(2);
-    editClipButton.setBounds(toolbar.removeFromLeft(75));
+    editClipButton.setBounds(toolbar.removeFromLeft(90));
     toolbar.removeFromLeft(2);
-    quantizeButton.setBounds(toolbar.removeFromLeft(70));
+    quantizeButton.setBounds(toolbar.removeFromLeft(82));
     toolbar.removeFromLeft(4);
-    gridSelector.setBounds(toolbar.removeFromLeft(65));
+    gridSelector.setBounds(toolbar.removeFromLeft(75));
     toolbar.removeFromLeft(4);
-    saveButton.setBounds(toolbar.removeFromLeft(50));
+    saveButton.setBounds(toolbar.removeFromLeft(60));
     toolbar.removeFromLeft(2);
-    loadButton.setBounds(toolbar.removeFromLeft(50));
+    loadButton.setBounds(toolbar.removeFromLeft(60));
     toolbar.removeFromLeft(2);
-    undoButton.setBounds(toolbar.removeFromLeft(50));
+    undoButton.setBounds(toolbar.removeFromLeft(60));
     toolbar.removeFromLeft(2);
-    redoButton.setBounds(toolbar.removeFromLeft(50));
+    redoButton.setBounds(toolbar.removeFromLeft(60));
 
     // Pack remaining controls at the right end of the toolbar
-    tapTempoButton.setBounds(toolbar.removeFromRight(50));
+    tapTempoButton.setBounds(toolbar.removeFromRight(60));
     toolbar.removeFromRight(3);
-    bpmUpButton.setBounds(toolbar.removeFromRight(32));
+    bpmUpButton.setBounds(toolbar.removeFromRight(38));
     toolbar.removeFromRight(2);
-    bpmLabel.setBounds(toolbar.removeFromRight(70));
+    bpmLabel.setBounds(toolbar.removeFromRight(80));
     toolbar.removeFromRight(2);
-    bpmDownButton.setBounds(toolbar.removeFromRight(32));
+    bpmDownButton.setBounds(toolbar.removeFromRight(38));
     toolbar.removeFromRight(6);
-    midi2Button.setBounds(toolbar.removeFromRight(36));
+    midi2Button.setBounds(toolbar.removeFromRight(42));
     toolbar.removeFromRight(2);
-    visSelector.setBounds(toolbar.removeFromRight(72));
+    visSelector.setBounds(toolbar.removeFromRight(82));
     toolbar.removeFromRight(2);
-    projectorButton.setBounds(toolbar.removeFromRight(38));
+    projectorButton.setVisible(false);
+    fullscreenButton.setBounds(toolbar.removeFromRight(46));
     toolbar.removeFromRight(2);
-    fullscreenButton.setBounds(toolbar.removeFromRight(32));
+    audioSettingsButton.setBounds(toolbar.removeFromRight(92));
     toolbar.removeFromRight(2);
-    audioSettingsButton.setBounds(toolbar.removeFromRight(80));
-    toolbar.removeFromRight(2);
-    themeSelector.setBounds(toolbar.removeFromRight(82));
+    themeSelector.setBounds(toolbar.removeFromRight(92));
 
     // ── Right Panel ──
     auto rightPanel = area.removeFromRight(rightPanelW).reduced(8, 4);
@@ -2468,6 +2643,9 @@ void MainComponent::resized()
             timelineComponent->setBounds(area);
         }
     }
+
+    // Gamepad overlay covers the main content area
+    gamepadOverlay.setBounds(getLocalBounds());
 }
 
 // ── Keyboard ─────────────────────────────────────────────────────────────────
@@ -2484,11 +2662,130 @@ int MainComponent::keyToNote(int keyCode) const
     }
 }
 
+void MainComponent::retrieveCapture()
+{
+    auto& eng = pluginHost.getEngine();
+    bool wasPlaying = eng.isPlaying();
+    bool clipsExist = hasExistingClips();
+
+    // Determine BPM: estimate from played notes if transport stopped and no clips exist
+    double bpm = eng.getBpm();
+    bool adjustedTempo = false;
+
+    if (!wasPlaying && !clipsExist)
+    {
+        double estimated = captureBuffer.estimateTempo();
+        if (estimated > 0.0)
+        {
+            bpm = estimated;
+            eng.setBpm(bpm);
+            bpmLabel.setText(juce::String(static_cast<int>(bpm)) + " BPM", juce::dontSendNotification);
+            adjustedTempo = true;
+        }
+    }
+
+    // Retrieve captured data grouped by track
+    auto captures = captureBuffer.retrieve(bpm);
+    if (captures.isEmpty())
+    {
+        statusLabel.setText("Capture: nothing to retrieve", juce::dontSendNotification);
+        return;
+    }
+
+    int totalNotes = 0;
+    int tracksUsed = 0;
+
+    for (auto& tc : captures)
+    {
+        auto& track = pluginHost.getTrack(tc.trackIndex);
+        if (!track.clipPlayer) continue;
+
+        // Find first empty slot
+        int targetSlot = -1;
+        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+        {
+            if (!track.clipPlayer->getSlot(s).hasContent())
+            {
+                targetSlot = s;
+                break;
+            }
+        }
+        if (targetSlot < 0) continue;
+
+        auto& slot = track.clipPlayer->getSlot(targetSlot);
+        if (!slot.clip)
+            slot.clip = std::make_unique<MidiClip>();
+
+        slot.clip->events.clear();
+        for (int i = 0; i < tc.sequence.getNumEvents(); ++i)
+            slot.clip->events.addEvent(tc.sequence.getEventPointer(i)->message);
+        slot.clip->events.updateMatchedPairs();
+        slot.clip->lengthInBeats = tc.lengthInBeats;
+
+        // Place clip at position 0 (if transport was stopped) or current playhead
+        if (wasPlaying)
+        {
+            double playhead = eng.getPositionInBeats();
+            double clipStart = std::floor(playhead / 4.0) * 4.0 - tc.lengthInBeats;
+            slot.clip->timelinePosition = juce::jmax(0.0, clipStart);
+        }
+        else
+        {
+            slot.clip->timelinePosition = 0.0;
+        }
+
+        slot.state.store(ClipSlot::Stopped);
+
+        // Count notes
+        for (int i = 0; i < tc.sequence.getNumEvents(); ++i)
+            if (tc.sequence.getEventPointer(i)->message.isNoteOn())
+                ++totalNotes;
+        ++tracksUsed;
+    }
+
+    // Status message
+    juce::String msg = "Captured " + juce::String(totalNotes) + " notes on "
+                       + juce::String(tracksUsed) + " track"
+                       + (tracksUsed != 1 ? "s" : "");
+    if (adjustedTempo)
+        msg += " (tempo: " + juce::String(static_cast<int>(bpm)) + " BPM)";
+    statusLabel.setText(msg, juce::dontSendNotification);
+
+    // Auto-start playback if transport was stopped
+    if (!wasPlaying)
+    {
+        eng.resetPosition();
+        eng.play();
+        playButton.setToggleState(true, juce::dontSendNotification);
+    }
+
+    if (timelineComponent) timelineComponent->repaint();
+    takeSnapshot();
+}
+
+bool MainComponent::hasExistingClips() const
+{
+    for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+    {
+        auto& track = pluginHost.getTrack(t);
+        if (!track.clipPlayer) continue;
+        for (int s = 0; s < ClipPlayerNode::NUM_SLOTS; ++s)
+            if (track.clipPlayer->getSlot(s).hasContent())
+                return true;
+    }
+    return false;
+}
+
 void MainComponent::sendNoteOn(int note)
 {
     auto msg = juce::MidiMessage::noteOn(1, note, 0.8f);
     msg.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
     pluginHost.getMidiCollector().addMessageToQueue(msg);
+
+    // Capture on armed tracks
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+    if (track.clipPlayer && track.clipPlayer->armed.load())
+        captureBuffer.addMessage(msg, selectedTrackIndex);
 }
 
 void MainComponent::sendNoteOff(int note)
@@ -2496,15 +2793,21 @@ void MainComponent::sendNoteOff(int note)
     auto msg = juce::MidiMessage::noteOff(1, note);
     msg.setTimeStamp(juce::Time::getMillisecondCounterHiRes() * 0.001);
     pluginHost.getMidiCollector().addMessageToQueue(msg);
+
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+    if (track.clipPlayer && track.clipPlayer->armed.load())
+        captureBuffer.addMessage(msg, selectedTrackIndex);
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
-    // ESC = exit fullscreen visualizer
+    // ESC = exit fullscreen visualizer (both modes)
     if (key == juce::KeyPress::escapeKey && visualizerFullScreen)
     {
         visualizerFullScreen = false;
+        projectorMode = false;
         fullscreenButton.setToggleState(false, juce::dontSendNotification);
+        projectorButton.setToggleState(false, juce::dontSendNotification);
         resized();
         repaint();
         grabKeyboardFocus();
@@ -2657,6 +2960,10 @@ void MainComponent::applyThemeToControls()
     panicButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffdd6600));
     midiLearnButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
     midiLearnButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.amber));
+    goButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
+    goButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.green));
+    captureButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
+    captureButton.setColour(juce::TextButton::textColourOffId, juce::Colour(c.textSecondary));
 
     // Edit toolbar
     newClipButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNewClip));

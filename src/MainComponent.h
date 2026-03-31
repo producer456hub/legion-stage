@@ -15,6 +15,9 @@
 #include "TouchPianoComponent.h"
 #include "MixerComponent.h"
 #include "UpdateDialog.h"
+#include "MidiCaptureBuffer.h"
+#include "GamepadHandler.h"
+#include "GamepadOverlayComponent.h"
 
 class PluginEditorWindow : public juce::DocumentWindow
 {
@@ -121,6 +124,17 @@ private:
     std::unique_ptr<MixerComponent> mixerComponent;
     juce::TextButton mixerButton { "MIX" };
     bool mixerVisible = false;
+
+    // ── MIDI Capture (Ableton-style — always listening on armed tracks) ──
+    MidiCaptureBuffer captureBuffer;
+    juce::TextButton captureButton { "CAPT" };
+    void retrieveCapture();
+    bool hasExistingClips() const;
+
+    // ── Gamepad (Legion Go) ──
+    GamepadHandler gamepadHandler;
+    GamepadOverlayComponent gamepadOverlay;
+    juce::TextButton goButton { "GO" };
 
     // ── Touch Piano ──
     TouchPianoComponent touchPiano;

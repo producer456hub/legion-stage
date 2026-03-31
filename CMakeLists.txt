@@ -58,6 +58,10 @@ target_sources(Sequencer PRIVATE
     src/UpdateChecker.cpp
     src/UpdateDialog.h
     src/UpdateDialog.cpp
+    src/MidiCaptureBuffer.h
+    src/GamepadHandler.h
+    src/GamepadHandler.cpp
+    src/GamepadOverlayComponent.h
 )
 
 target_compile_definitions(Sequencer PRIVATE
@@ -83,4 +87,5 @@ target_link_libraries(Sequencer PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
     opengl32
+    xinput
 )

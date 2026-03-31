@@ -216,24 +216,58 @@ public:
     static constexpr int OLED_W = 32;
     static constexpr int OLED_H = 12;
 
-    // Keystage: OLED screen buttons with pixelated animated icons
+    // Keystage: OLED screen buttons inlaid into white oak — recessed with borders on all sides
     void drawButtonBackground(juce::Graphics& g, juce::Button& button,
                               const juce::Colour&,
                               bool shouldDrawButtonAsHighlighted,
                               bool shouldDrawButtonAsDown) override
     {
-        auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
+        auto bounds = button.getLocalBounds().toFloat().reduced(1.5f);
+        float radius = 4.0f;
 
-        g.setColour(juce::Colour(0xff000000));
-        g.fillRoundedRectangle(bounds, 3.0f);
+        // Outer shadow — dark edge at bottom/right to simulate depth into oak
+        {
+            auto shadowRect = bounds.translated(0.5f, 0.5f);
+            g.setColour(juce::Colour(0x50000000));
+            g.drawRoundedRectangle(shadowRect, radius, 1.0f);
+        }
 
+        // Inner highlight — light edge at top/left to simulate oak lip catching light
+        {
+            auto highlightRect = bounds.translated(-0.5f, -0.5f);
+            g.setColour(juce::Colour(0x30d6ccba));
+            g.drawRoundedRectangle(highlightRect, radius, 0.8f);
+        }
+
+        // Recessed black face
+        g.setColour(juce::Colour(0xff080808));
+        g.fillRoundedRectangle(bounds, radius);
+
+        // Inset bevel — darker inner edge on top/left, lighter on bottom/right
+        {
+            g.saveState();
+            g.reduceClipRegion(bounds.toNearestIntEdges());
+            // Top inner shadow
+            g.setColour(juce::Colour(0x40000000));
+            g.fillRect(bounds.getX(), bounds.getY(), bounds.getWidth(), 1.5f);
+            // Left inner shadow
+            g.fillRect(bounds.getX(), bounds.getY(), 1.5f, bounds.getHeight());
+            // Bottom inner highlight
+            g.setColour(juce::Colour(0x18ffffff));
+            g.fillRect(bounds.getX(), bounds.getBottom() - 1.0f, bounds.getWidth(), 1.0f);
+            // Right inner highlight
+            g.fillRect(bounds.getRight() - 1.0f, bounds.getY(), 1.0f, bounds.getHeight());
+            g.restoreState();
+        }
+
+        // Border — solid on all sides
         if (shouldDrawButtonAsDown)
-            g.setColour(juce::Colour(0xffb8d8f0).withAlpha(0.5f));
+            g.setColour(juce::Colour(0xffb8d8f0).withAlpha(0.6f));
         else if (shouldDrawButtonAsHighlighted)
-            g.setColour(juce::Colour(0xff4a6878));
+            g.setColour(juce::Colour(0xff5a7888));
         else
-            g.setColour(juce::Colour(0xff2a3530));
-        g.drawRoundedRectangle(bounds, 3.0f, 0.8f);
+            g.setColour(juce::Colour(0xff3a3530));
+        g.drawRoundedRectangle(bounds, radius, 1.2f);
     }
 
     // Keystage overrides the base OLED art with ice-blue colors and custom REC
