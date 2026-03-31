@@ -233,6 +233,9 @@ MainComponent::MainComponent()
         panicAnimEndTime = juce::Time::getMillisecondCounterHiRes() * 0.001 + 3.0;
     };
 
+    addAndMakeVisible(captureButton);
+    captureButton.onClick = [this] { performMidiCapture(); };
+
     addAndMakeVisible(zoomInButton);
     zoomInButton.onClick = [this] { if (timelineComponent) timelineComponent->zoomIn(); };
 
@@ -573,6 +576,31 @@ MainComponent::MainComponent()
 
     testNoteButton.setVisible(false);
 
+    // ── Quick Keys ──
+    addAndMakeVisible(quickKeysButton);
+    quickKeysButton.setClickingTogglesState(true);
+    quickKeysButton.onClick = [this] {
+        quickKeysEnabled = quickKeysButton.getToggleState();
+        if (quickKeysEnabled)
+        {
+            setupQuickKeysCallbacks();
+            if (quickKeysHandler.openDevice())
+            {
+                syncQuickKeysParams();
+            }
+            else
+            {
+                statusLabel.setText("Quick Keys: device not found", juce::dontSendNotification);
+                quickKeysButton.setToggleState(false, juce::dontSendNotification);
+                quickKeysEnabled = false;
+            }
+        }
+        else
+        {
+            quickKeysHandler.closeDevice();
+        }
+    };
+
     // ── Touch Piano ──
     addChildComponent(touchPiano);  // hidden by default
     touchPiano.onNote = [this](int note, bool isOn) {
@@ -783,6 +811,7 @@ MainComponent::~MainComponent()
         if (track.gainProcessor) track.gainProcessor->lissajousDisplay = nullptr;
     }
     setLookAndFeel(nullptr);  // clear before ThemeManager destructs
+    quickKeysHandler.closeDevice();
     stopTimer();
     disableCurrentMidiDevice();
     closePluginEditor();
@@ -982,10 +1011,12 @@ void MainComponent::updateTrackDisplay()
 
     updateParamSliders();
 
-    // Update MIDI 2.0 handler
-    if (midi2Enabled)
+    // Update MIDI 2.0 handler — also needed by Quick Keys Solo mode for param mappings
+    if (midi2Enabled || quickKeysEnabled)
         midi2Handler.setPlugin(track.plugin);
 
+    if (quickKeysEnabled)
+        syncQuickKeysParams();
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -1111,6 +1142,18 @@ void MainComponent::selectMidiDevice()
 
 void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const juce::MidiMessage& msg)
 {
+    // Always feed note-on/off into the rolling capture buffer
+    if (msg.isNoteOnOrOff())
+    {
+        juce::int64 now = juce::Time::currentTimeMillis();
+        juce::ScopedLock lock(captureLock);
+        captureBuffer.add({ msg, now });
+        // Trim entries older than the capture window
+        juce::int64 cutoff = now - CAPTURE_WINDOW_MS;
+        while (!captureBuffer.isEmpty() && captureBuffer.getFirst().timestampMs < cutoff)
+            captureBuffer.remove(0);
+    }
+
     // MIDI Learn — capture CC mapping
     if (midiLearnActive && midiLearnTarget != MidiTarget::None && msg.isController())
     {
@@ -1997,6 +2040,8 @@ void MainComponent::resized()
     topBar.removeFromLeft(3);
     panicButton.setBounds(topBar.removeFromLeft(65));
     topBar.removeFromLeft(3);
+    captureButton.setBounds(topBar.removeFromLeft(55));
+    topBar.removeFromLeft(3);
     pianoToggleButton.setBounds(topBar.removeFromLeft(50));
     topBar.removeFromLeft(3);
     mixerButton.setBounds(topBar.removeFromLeft(42));
@@ -2247,6 +2292,8 @@ void MainComponent::resized()
     bpmDownButton.setBounds(toolbar.removeFromRight(32));
     toolbar.removeFromRight(6);
     midi2Button.setBounds(toolbar.removeFromRight(36));
+    toolbar.removeFromRight(2);
+    quickKeysButton.setBounds(toolbar.removeFromRight(36));
     toolbar.removeFromRight(2);
     visSelector.setBounds(toolbar.removeFromRight(72));
     toolbar.removeFromRight(2);
@@ -2655,6 +2702,8 @@ void MainComponent::applyThemeToControls()
     loopButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnLoop));
     loopButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.btnLoopOn));
     panicButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffdd6600));
+    captureButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnMidi2));
+    captureButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.btnMidi2On));
     midiLearnButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
     midiLearnButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.amber));
 
@@ -2676,6 +2725,8 @@ void MainComponent::applyThemeToControls()
     midiRefreshButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnNav));
     midi2Button.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnMidi2));
     midi2Button.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.btnMidi2On));
+    quickKeysButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnMidi2));
+    quickKeysButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(c.btnMidi2On));
     saveButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnSave));
     loadButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnLoad));
     undoButton.setColour(juce::TextButton::buttonColourId, juce::Colour(c.btnUndoRedo));
@@ -2926,4 +2977,294 @@ void MainComponent::applyMidiCC(const MidiMapping& mapping, int value)
             break;
         default: break;
     }
+}
+
+// ── Quick Keys Integration ───────────────────────────────────────────────────
+
+void MainComponent::flushMidi2Outgoing()
+{
+    auto& ciOut = midi2Handler.getOutgoing();
+    if (!ciOut.isEmpty() && midiOutput)
+    {
+        for (const auto metadata : ciOut)
+            midiOutput->sendMessageNow(metadata.getMessage());
+    }
+    midi2Handler.clearOutgoing();
+}
+
+void MainComponent::syncQuickKeysParams()
+{
+    if (!quickKeysEnabled || !quickKeysHandler.isDeviceConnected())
+        return;
+
+    if (quickKeysHandler.getMode() != QuickKeysHandler::Mode::Solo)
+        return;
+
+    auto& mappings = midi2Handler.getMappings();
+    juce::StringArray names;
+    for (auto& m : mappings)
+        names.add(m.name);
+
+    quickKeysHandler.setParamNames(names, 0);
+    quickKeysHandler.setPageLabel("PG " + juce::String(midi2Handler.getCurrentPage() + 1)
+        + "/" + juce::String(midi2Handler.getNumPages()));
+}
+
+void MainComponent::setupQuickKeysCallbacks()
+{
+    QuickKeysHandler::Callbacks cb;
+
+    // Transport
+    cb.onPlay = [this] {
+        pluginHost.getEngine().play();
+        playButton.setToggleState(true, juce::dontSendNotification);
+        quickKeysHandler.setTransportState(true, pluginHost.getEngine().isRecording());
+    };
+
+    cb.onStop = [this] {
+        auto& eng = pluginHost.getEngine();
+        if (!eng.isPlaying())
+        {
+            eng.resetPosition();
+            for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+            {
+                auto* cp = pluginHost.getTrack(t).clipPlayer;
+                if (cp) cp->stopAllSlots();
+            }
+        }
+        else
+        {
+            eng.stop();
+            for (int t = 0; t < PluginHost::NUM_TRACKS; ++t)
+            {
+                auto* cp = pluginHost.getTrack(t).clipPlayer;
+                if (cp) cp->sendAllNotesOff.store(true);
+            }
+        }
+        playButton.setToggleState(false, juce::dontSendNotification);
+        quickKeysHandler.setTransportState(false, false);
+        if (timelineComponent) timelineComponent->repaint();
+    };
+
+    cb.onRecord = [this] {
+        pluginHost.getEngine().toggleRecord();
+        bool rec = pluginHost.getEngine().isRecording();
+        recordButton.setToggleState(rec, juce::dontSendNotification);
+        quickKeysHandler.setTransportState(pluginHost.getEngine().isPlaying(), rec);
+    };
+
+    cb.onLoop = [this] {
+        pluginHost.getEngine().toggleLoop();
+        loopButton.setToggleState(pluginHost.getEngine().isLoopEnabled(), juce::dontSendNotification);
+    };
+
+    cb.onMetronome = [this] {
+        pluginHost.getEngine().toggleMetronome();
+        metronomeButton.setToggleState(pluginHost.getEngine().isMetronomeOn(), juce::dontSendNotification);
+    };
+
+    // Track navigation
+    cb.onTrackPrev = [this] {
+        selectTrack(juce::jmax(0, selectedTrackIndex - 1));
+        syncQuickKeysParams();
+        quickKeysHandler.showParamValue(pluginHost.getTrack(selectedTrackIndex).name);
+    };
+
+    cb.onTrackNext = [this] {
+        selectTrack(juce::jmin(PluginHost::NUM_TRACKS - 1, selectedTrackIndex + 1));
+        syncQuickKeysParams();
+        quickKeysHandler.showParamValue(pluginHost.getTrack(selectedTrackIndex).name);
+    };
+
+    // FX slot navigation (placeholder)
+    cb.onFxSlotPrev = [this] {
+        statusLabel.setText("Prev FX slot", juce::dontSendNotification);
+    };
+    cb.onFxSlotNext = [this] {
+        statusLabel.setText("Next FX slot", juce::dontSendNotification);
+    };
+
+    // Page navigation
+    cb.onPageNext = [this] {
+        midi2Handler.nextPage();
+        flushMidi2Outgoing();
+        syncQuickKeysParams();
+        trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1)
+            + "/" + juce::String(midi2Handler.getNumPages()), juce::dontSendNotification);
+        quickKeysHandler.setPageLabel("PG " + juce::String(midi2Handler.getCurrentPage() + 1)
+            + "/" + juce::String(midi2Handler.getNumPages()));
+        updateParamSliders();
+    };
+
+    cb.onPagePrev = [this] {
+        midi2Handler.prevPage();
+        flushMidi2Outgoing();
+        syncQuickKeysParams();
+        trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1)
+            + "/" + juce::String(midi2Handler.getNumPages()), juce::dontSendNotification);
+        quickKeysHandler.setPageLabel("PG " + juce::String(midi2Handler.getCurrentPage() + 1)
+            + "/" + juce::String(midi2Handler.getNumPages()));
+        updateParamSliders();
+    };
+
+    // Preset navigation
+    cb.onPresetNext = [this] {
+        midi2Handler.nextPreset();
+        auto& trk = pluginHost.getTrack(selectedTrackIndex);
+        if (trk.plugin)
+        {
+            juce::String name = trk.plugin->getProgramName(trk.plugin->getCurrentProgram());
+            trackNameLabel.setText("Preset: " + name, juce::dontSendNotification);
+            quickKeysHandler.showParamValue(name);
+        }
+    };
+
+    cb.onPresetPrev = [this] {
+        midi2Handler.prevPreset();
+        auto& trk = pluginHost.getTrack(selectedTrackIndex);
+        if (trk.plugin)
+        {
+            juce::String name = trk.plugin->getProgramName(trk.plugin->getCurrentProgram());
+            trackNameLabel.setText("Preset: " + name, juce::dontSendNotification);
+            quickKeysHandler.showParamValue(name);
+        }
+    };
+
+    // Playhead scrub
+    cb.onScrub = [this](int direction) {
+        auto& eng = pluginHost.getEngine();
+        double pos = eng.getPositionInBeats();
+        double grid = timelineComponent ? timelineComponent->getGridResolution() : 1.0;
+        eng.setPosition(juce::jmax(0.0, pos + direction * grid));
+        if (timelineComponent) timelineComponent->repaint();
+    };
+
+    // Parameter control (Solo mode)
+    cb.onParamChange = [this](int paramIndex, float value) {
+        auto& mappings = midi2Handler.getMappings();
+        if (paramIndex < mappings.size())
+        {
+            auto& trk = pluginHost.getTrack(selectedTrackIndex);
+            if (trk.plugin)
+            {
+                auto& params = trk.plugin->getParameters();
+                int pIdx = mappings[paramIndex].pluginParamIndex;
+                if (pIdx >= 0 && pIdx < params.size())
+                {
+                    params[pIdx]->setValue(value);
+
+                    if (midi2Enabled && midi2Handler.isConnected())
+                    {
+                        midi2Handler.sendParameterUpdate();
+                        flushMidi2Outgoing();
+                    }
+                }
+            }
+        }
+    };
+
+    // Status
+    cb.onStatus = [this](const juce::String& text) {
+        statusLabel.setText(text, juce::dontSendNotification);
+    };
+
+    quickKeysHandler.setCallbacks(cb);
+}
+
+// ── MIDI Capture ─────────────────────────────────────────────────────────────
+
+void MainComponent::performMidiCapture()
+{
+    // Snapshot the capture buffer under lock
+    juce::Array<CapturedMidiEvent> snapshot;
+    {
+        juce::ScopedLock lock(captureLock);
+        snapshot = captureBuffer;
+    }
+
+    if (snapshot.isEmpty())
+    {
+        statusLabel.setText("Capture: nothing played yet", juce::dontSendNotification);
+        return;
+    }
+
+    // Find first note-on and last note-off to determine phrase boundaries
+    juce::int64 firstNoteMs = snapshot.getLast().timestampMs; // will scan down
+    juce::int64 lastNoteMs  = snapshot.getFirst().timestampMs;
+
+    for (auto& ev : snapshot)
+    {
+        if (ev.message.isNoteOn())
+            firstNoteMs = juce::jmin(firstNoteMs, ev.timestampMs);
+        lastNoteMs = juce::jmax(lastNoteMs, ev.timestampMs);
+    }
+
+    double bpm        = pluginHost.getEngine().getBpm();
+    double beatsPerMs = bpm / 60000.0;
+
+    // Convert wall-clock span to beats
+    double spanBeats = (lastNoteMs - firstNoteMs) * beatsPerMs;
+
+    // Round up to nearest bar (4 beats)
+    double clipLengthBeats = std::max(4.0, std::ceil(spanBeats / 4.0) * 4.0);
+
+    // Build the clip — timestamps relative to first note
+    auto clip = std::make_unique<MidiClip>();
+    clip->lengthInBeats  = clipLengthBeats;
+    clip->timelinePosition = pluginHost.getEngine().getPositionInBeats();
+
+    for (auto& ev : snapshot)
+    {
+        if (ev.timestampMs < firstNoteMs) continue;
+        double beatOffset = (ev.timestampMs - firstNoteMs) * beatsPerMs;
+        if (beatOffset > clipLengthBeats) continue;
+
+        juce::MidiMessage m = ev.message;
+        m.setTimeStamp(beatOffset);
+        clip->events.addEvent(m);
+    }
+    clip->events.sort();
+    clip->events.updateMatchedPairs();
+
+    // Find the first empty slot in the selected track
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+    if (!track.clipPlayer)
+    {
+        statusLabel.setText("Capture: no clip player on selected track", juce::dontSendNotification);
+        return;
+    }
+
+    int targetSlot = -1;
+    for (int i = 0; i < ClipPlayerNode::NUM_SLOTS; ++i)
+    {
+        if (!track.clipPlayer->getSlot(i).hasContent())
+        {
+            targetSlot = i;
+            break;
+        }
+    }
+
+    if (targetSlot < 0)
+    {
+        statusLabel.setText("Capture: no empty slot on track — clear one first", juce::dontSendNotification);
+        return;
+    }
+
+    auto& slot = track.clipPlayer->getSlot(targetSlot);
+    slot.clip  = std::move(clip);
+    slot.state.store(ClipSlot::Stopped);
+
+    // Clear the capture buffer so the next press doesn't re-capture the same notes
+    {
+        juce::ScopedLock lock(captureLock);
+        captureBuffer.clear();
+    }
+
+    int numEvents = slot.clip->events.getNumEvents();
+    statusLabel.setText("Captured " + juce::String(numEvents / 2) + " notes → Track "
+        + juce::String(selectedTrackIndex + 1) + " Slot " + juce::String(targetSlot + 1),
+        juce::dontSendNotification);
+
+    if (timelineComponent) timelineComponent->repaint();
+    updateTrackDisplay();
 }

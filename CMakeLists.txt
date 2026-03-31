@@ -30,6 +30,8 @@ target_sources(Sequencer PRIVATE
     src/PianoRollComponent.cpp
     src/Midi2Handler.h
     src/Midi2Handler.cpp
+    src/QuickKeysHandler.h
+    src/QuickKeysHandler.cpp
     src/DawTheme.h
     src/DawLookAndFeel.h
     src/WalkmanLookAndFeel.h
