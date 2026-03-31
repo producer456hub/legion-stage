@@ -279,29 +279,81 @@ protected:
         }
         else if (text == "KEYS")
         {
-            // Horizontal piano keys (viewed from above)
-            int keyTop = icy - 5;
-            for (int i = 0; i < 7; ++i)
+            // Heartbeat piano — flat line that morphs into key silhouette with traveling pulse
+            int lineY = icy;
+            int kx0 = 2;
+            int kx1 = OLED_W - 3;
+
+            if (!on)
             {
-                int ky = keyTop + i * 2;
-                for (int kx = icx - 5; kx <= icx + 5; ++kx)
-                    oledPlot(oled, kx, ky, col);
+                // Static: flat line with subtle piano key bumps poking up
+                for (int x = kx0; x <= kx1; ++x)
+                    oledPlot(oled, x, lineY, col);
+                // Key bumps at piano-key intervals — white keys poke up 2px
+                int keyPositions[] = { 4, 7, 10, 14, 17, 20, 23, 27 };
+                for (int kp : keyPositions)
+                {
+                    if (kp > kx1) break;
+                    oledPlot(oled, kp, lineY - 1, col);
+                    oledPlot(oled, kp, lineY - 2, col.withAlpha(0.6f));
+                }
+                // Black key notches dip down between some white keys
+                int blackPositions[] = { 5, 8, 15, 18, 21 };
+                for (int bp : blackPositions)
+                {
+                    if (bp > kx1) break;
+                    oledPlot(oled, bp, lineY + 1, col.withAlpha(0.5f));
+                }
             }
-            // Black keys (shorter, from left side)
-            int bk[] = { 0, 1, 3, 4, 5 };
-            for (int b : bk)
+            else
             {
-                int ky = keyTop + b * 2 + 1;
-                for (int kx = icx - 5; kx <= icx; ++kx)
-                    oledPlot(oled, kx, ky, juce::Colour(0xff000000));
-            }
-            if (on)
-            {
-                // Animated key press glow
-                int pressIdx = static_cast<int>(t * 5.0f) % 7;
-                int ky = keyTop + pressIdx * 2;
-                oledPlot(oled, icx + 5, ky, bright);
-                oledPlot(oled, icx + 4, ky, bright.withAlpha(0.5f));
+                // Animated: pulse travels across, keys rise as it passes
+                float pulseX = std::fmod(t * 10.0f, static_cast<float>(kx1 - kx0 + 8)) + kx0 - 4;
+
+                // Base line
+                for (int x = kx0; x <= kx1; ++x)
+                    oledPlot(oled, x, lineY, col.withAlpha(0.4f));
+
+                // Piano key positions and heights
+                int keyPositions[] = { 4, 7, 10, 14, 17, 20, 23, 27 };
+                int blackPositions[] = { 5, 8, 15, 18, 21 };
+
+                // Keys rise and fall as pulse passes
+                for (int kp : keyPositions)
+                {
+                    if (kp > kx1) break;
+                    float dist = std::abs(static_cast<float>(kp) - pulseX);
+                    float rise = juce::jmax(0.0f, 1.0f - dist / 5.0f);
+                    int height = static_cast<int>(rise * 4.0f);
+                    for (int dy = 0; dy <= height; ++dy)
+                    {
+                        float fade = 1.0f - static_cast<float>(dy) / 5.0f;
+                        oledPlot(oled, kp, lineY - dy, bright.withAlpha(rise * fade));
+                    }
+                    // Restore the base pixel bright where key is
+                    oledPlot(oled, kp, lineY, col);
+                }
+
+                // Black key notches pulse downward
+                for (int bp : blackPositions)
+                {
+                    if (bp > kx1) break;
+                    float dist = std::abs(static_cast<float>(bp) - pulseX);
+                    float dip = juce::jmax(0.0f, 1.0f - dist / 4.0f);
+                    int depth = static_cast<int>(dip * 2.0f);
+                    for (int dy = 1; dy <= depth; ++dy)
+                        oledPlot(oled, bp, lineY + dy, col.withAlpha(dip * 0.6f));
+                    oledPlot(oled, bp, lineY, col);
+                }
+
+                // Bright pulse dot traveling along the line
+                int px = static_cast<int>(pulseX);
+                if (px >= kx0 && px <= kx1)
+                {
+                    oledPlot(oled, px, lineY, bright);
+                    if (px - 1 >= kx0) oledPlot(oled, px - 1, lineY, bright.withAlpha(0.5f));
+                    if (px + 1 <= kx1) oledPlot(oled, px + 1, lineY, bright.withAlpha(0.5f));
+                }
             }
         }
         else if (text == "VIS")

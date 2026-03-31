@@ -174,6 +174,9 @@ public:
         g.drawImageAt(img, 0, 0);
     }
 
+    std::function<void()> onDoubleClick;
+    void mouseDoubleClick(const juce::MouseEvent&) override { if (onDoubleClick) onDoubleClick(); }
+
 private:
     std::array<float, WAVE_SIZE> waveBuffer;
     int writePos = 0;

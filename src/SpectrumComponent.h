@@ -129,6 +129,9 @@ public:
         }
     }
 
+    std::function<void()> onDoubleClick;
+    void mouseDoubleClick(const juce::MouseEvent&) override { if (onDoubleClick) onDoubleClick(); }
+
 private:
     juce::dsp::FFT fft { fftOrder };
 

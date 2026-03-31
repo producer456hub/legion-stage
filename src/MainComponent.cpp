@@ -324,6 +324,14 @@ MainComponent::MainComponent()
         repaint();
     };
 
+    // Double-click any visualizer to toggle fullscreen
+    auto visDoubleClickHandler = [this] { fullscreenButton.triggerClick(); };
+    spectrumDisplay.onDoubleClick = visDoubleClickHandler;
+    lissajousDisplay.onDoubleClick = visDoubleClickHandler;
+    gforceDisplay.onDoubleClick = visDoubleClickHandler;
+    geissDisplay.onDoubleClick = visDoubleClickHandler;
+    projectMDisplay.onDoubleClick = visDoubleClickHandler;
+
     addAndMakeVisible(visSelector);
     visSelector.addItem("Spectrum", 1);
     visSelector.addItem("Lissajous", 2);
@@ -760,8 +768,8 @@ MainComponent::MainComponent()
     addAndMakeVisible(volumeSlider);
     volumeSlider.setRange(0.0, 1.0, 0.01);
     volumeSlider.setValue(0.8, juce::dontSendNotification);
-    volumeSlider.setSliderStyle(juce::Slider::LinearVertical);
-    volumeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 18);
+    volumeSlider.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+    volumeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 14);
     volumeSlider.onValueChange = [this] {
         if (midiLearnActive) { startMidiLearn(MidiTarget::Volume); return; }
         auto& track = pluginHost.getTrack(selectedTrackIndex);
@@ -2145,51 +2153,55 @@ void MainComponent::resized()
     int bottomBarH = 45;
     int rightPanelW = 180;
 
-    // ── Top Bar — transport centered on full width ──
+    // ── Top Bar — all buttons in one row, square, evenly spaced ──
     auto topBar = area.removeFromTop(topBarH).reduced(4, 8);
     int fullBarX = topBar.getX();
     int fullBarW = topBar.getWidth();
     int barY = topBar.getY();
     int barH = topBar.getHeight();
 
-    // Center section first — transport (STOP, PLAY, REC, MET, COUNT-IN, LOOP)
-    int transportW = 75 + 3 + 80 + 3 + 80 + 3 + 60 + 3 + 90 + 3 + 72;
-    int tx = fullBarX + (fullBarW - transportW) / 2;
+    int bSz = barH;  // square button size = bar height
+    int gap = 4;
 
-    stopButton.setBounds(tx, barY, 75, barH);       tx += 75 + 3;
-    playButton.setBounds(tx, barY, 80, barH);        tx += 80 + 3;
-    recordButton.setBounds(tx, barY, 80, barH);      tx += 80 + 3;
-    metronomeButton.setBounds(tx, barY, 60, barH);   tx += 60 + 3;
-    countInButton.setBounds(tx, barY, 90, barH);     tx += 90 + 3;
-    loopButton.setBounds(tx, barY, 72, barH);
+    // Status/beat labels on the far right (not square buttons)
+    auto rightLabels = topBar;
+    beatLabel.setBounds(rightLabels.removeFromRight(100));
+    rightLabels.removeFromRight(gap);
+    statusLabel.setBounds(rightLabels.removeFromRight(juce::jmin(120, rightLabels.getWidth() / 6)));
+    int labelsW = fullBarW - rightLabels.getWidth();  // space consumed by labels
 
-    // Left section — pack from left edge
-    auto leftBar = topBar;
-    midiLearnButton.setBounds(leftBar.removeFromLeft(70));
-    leftBar.removeFromLeft(3);
-    trackNameLabel.setBounds(leftBar.removeFromLeft(140));
-
-    // Right section — pack from right edge
-    auto rightBar = topBar;
-    beatLabel.setBounds(rightBar.removeFromRight(100));
-    rightBar.removeFromRight(3);
-    statusLabel.setBounds(rightBar.removeFromRight(juce::jmin(140, rightBar.getWidth() / 5)));
-    rightBar.removeFromRight(3);
     zoomOutButton.setVisible(false);
     zoomInButton.setVisible(false);
-    scrollRightButton.setBounds(rightBar.removeFromRight(40));
-    rightBar.removeFromRight(2);
-    scrollLeftButton.setBounds(rightBar.removeFromRight(40));
-    rightBar.removeFromRight(3);
-    captureButton.setBounds(rightBar.removeFromRight(58));
-    rightBar.removeFromRight(3);
-    goButton.setBounds(rightBar.removeFromRight(46));
-    rightBar.removeFromRight(3);
-    mixerButton.setBounds(rightBar.removeFromRight(46));
-    rightBar.removeFromRight(3);
-    pianoToggleButton.setBounds(rightBar.removeFromRight(52));
-    rightBar.removeFromRight(3);
-    panicButton.setBounds(rightBar.removeFromRight(65));
+    trackNameLabel.setBounds(0, 0, 0, 0);  // hidden from layout
+
+    // All buttons left-to-right: LEARN | PANIC | KEYS | MIX | STOP | PLAY | REC | MET | COUNT-IN | LOOP | GO | CAPTURE | <<  | >>
+    int numButtons = 14;
+    int availW = fullBarW - labelsW - gap;
+    int stride = availW / numButtons;
+    // Clamp button size: square but don't exceed stride minus gap
+    int btnSz = juce::jmin(bSz, stride - gap);
+    int bY = barY + (barH - btnSz) / 2;
+    int tx = fullBarX;
+
+    auto placeBtn = [&](juce::Component& btn) {
+        btn.setBounds(tx + (stride - btnSz) / 2, bY, btnSz, btnSz);
+        tx += stride;
+    };
+
+    placeBtn(midiLearnButton);
+    placeBtn(panicButton);
+    placeBtn(pianoToggleButton);
+    placeBtn(mixerButton);
+    placeBtn(stopButton);
+    placeBtn(playButton);
+    placeBtn(recordButton);
+    placeBtn(captureButton);
+    placeBtn(metronomeButton);
+    placeBtn(countInButton);
+    placeBtn(loopButton);
+    placeBtn(goButton);
+    placeBtn(scrollLeftButton);
+    placeBtn(scrollRightButton);
 
     // ── Fullscreen Visualizer Mode ──
     if (visualizerFullScreen)

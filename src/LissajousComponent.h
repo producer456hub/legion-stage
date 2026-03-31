@@ -188,6 +188,9 @@ public:
         }
     }
 
+    std::function<void()> onDoubleClick;
+    void mouseDoubleClick(const juce::MouseEvent&) override { if (onDoubleClick) onDoubleClick(); }
+
 private:
     float bufL[bufferSize] = {};
     float bufR[bufferSize] = {};

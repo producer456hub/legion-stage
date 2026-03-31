@@ -41,8 +41,8 @@ private:
     double lastPaintedScrollX = -1.0;
     int scrollY = 0;           // vertical scroll offset in pixels
     double pixelsPerBeat = 40.0;
-    int trackHeight = 72;      // computed dynamically to fit 8 tracks
-    static constexpr int visibleTracks = 8;
+    int trackHeight = 72;      // computed dynamically to fit 7 tracks
+    static constexpr int visibleTracks = 7;
     int headerHeight = 28;
     int trackLabelWidth = 140;  // room for track name + M/S buttons
     double gridResolution = 0.25; // beats per grid line (0.25 = 1/16, 0.5 = 1/8, 1.0 = 1/4)
