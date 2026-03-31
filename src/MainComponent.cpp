@@ -2180,19 +2180,14 @@ void MainComponent::resized()
     int bSz = barH;  // square button size = bar height
     int gap = 4;
 
-    // Status/beat labels on the far right (not square buttons)
-    auto rightLabels = topBar;
-    beatPanel.setBounds(rightLabels.removeFromRight(280));
     statusLabel.setBounds(0, 0, 0, 0);  // hidden — info merged into beatPanel
-    int labelsW = fullBarW - rightLabels.getWidth();  // space consumed by labels
-
     zoomOutButton.setVisible(false);
     zoomInButton.setVisible(false);
     trackNameLabel.setBounds(0, 0, 0, 0);  // hidden from layout
 
-    // All buttons left-to-right: LEARN | PANIC | KEYS | MIX | STOP | PLAY | REC | MET | COUNT-IN | LOOP | GO | CAPTURE | <<  | >>
-    int numButtons = 14;
-    int availW = fullBarW - labelsW - gap;
+    // All buttons + beat panel in one row
+    int numButtons = 15;  // 14 buttons + beat panel
+    int availW = fullBarW - gap;
     int stride = availW / numButtons;
     // Clamp button size: square but don't exceed stride minus gap
     int btnSz = juce::jmin(bSz, stride - gap);
@@ -2218,6 +2213,7 @@ void MainComponent::resized()
     placeBtn(goButton);
     placeBtn(scrollLeftButton);
     placeBtn(scrollRightButton);
+    placeBtn(beatPanel);
 
     // ── Fullscreen Visualizer Mode ──
     if (visualizerFullScreen)
