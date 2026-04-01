@@ -1,4 +1,5 @@
 #include "Midi2Handler.h"
+#include <set>
 
 Midi2Handler::Midi2Handler()
 {
@@ -71,19 +72,26 @@ void Midi2Handler::buildMappings()
                 m.name = params[macroIndices[i]]->getName(16);
                 mappings.add(m);
             }
-            return;
+            // Fall through to fill remaining slots with sequential params below
         }
     }
 
-    // Use sequential params based on page
+    // Fill remaining slots (up to 8) with sequential params
+    // Build a set of already-used param indices to avoid duplicates
+    std::set<int> usedIndices;
+    for (auto& m : mappings)
+        usedIndices.insert(m.pluginParamIndex);
+
     int startParam = currentPage * 8;
-    for (int i = 0; i < 8 && (startParam + i) < params.size(); ++i)
+    for (int p = startParam; mappings.size() < 8 && p < params.size(); ++p)
     {
+        if (usedIndices.count(p)) continue;
         ParamMapping m;
-        m.pluginParamIndex = startParam + i;
-        m.cc = i;
-        m.name = params[startParam + i]->getName(16);
+        m.pluginParamIndex = p;
+        m.cc = mappings.size();
+        m.name = params[p]->getName(16);
         mappings.add(m);
+        usedIndices.insert(p);
     }
 
     // Apply custom slot overrides

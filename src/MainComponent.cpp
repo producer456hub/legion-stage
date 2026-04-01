@@ -892,6 +892,10 @@ MainComponent::MainComponent()
 
             params[realIdx]->setValue(static_cast<float>(slider->getValue()));
 
+            // Push value to Quick Keys device immediately (don't wait for listener coalescing)
+            if (quickKeysEnabled)
+                syncQuickKeysParams();
+
             // Record automation if transport is playing + recording
             auto& eng = pluginHost.getEngine();
             if (eng.isPlaying() && eng.isRecording() && !eng.isInCountIn())
@@ -1190,10 +1194,10 @@ void MainComponent::updateTrackDisplay()
     info += "Armed: " + juce::String(track.clipPlayer && track.clipPlayer->armed.load() ? "Yes" : "No");
     trackInfoLabel.setText(info, juce::dontSendNotification);
 
-    updateParamSliders();
-
     // Always build mappings — needed for param sliders even without M2/QK connected
     midi2Handler.setPlugin(track.plugin);
+
+    updateParamSliders();
 
     if (quickKeysEnabled)
         syncQuickKeysParams();
@@ -3519,6 +3523,42 @@ void MainComponent::setupQuickKeysCallbacks()
         double bpm = juce::jlimit(20.0, 300.0, pluginHost.getEngine().getBpm() + delta);
         pluginHost.getEngine().setBpm(bpm);
         bpmLabel.setText(juce::String(static_cast<int>(bpm)) + " BPM", juce::dontSendNotification);
+    };
+
+    // ── Visuals mode ──
+    cb.onVisSpectrum  = [this] { visSelector.setSelectedId(1, juce::sendNotification); };
+    cb.onVisLissajous = [this] { visSelector.setSelectedId(2, juce::sendNotification); };
+    cb.onVisGForce    = [this] { visSelector.setSelectedId(3, juce::sendNotification); };
+    cb.onVisGeiss     = [this] { visSelector.setSelectedId(4, juce::sendNotification); };
+    cb.onVisProjectM  = [this] { visSelector.setSelectedId(5, juce::sendNotification); };
+    cb.onVisFullscreen = [this] { fullscreenButton.triggerClick(); };
+    cb.onVisPresetPrev = [this] {
+        // Prev preset/scene for the current vis
+        if (currentVisMode == 3) geissSceneBtn.triggerClick();       // Geiss scene
+        else if (currentVisMode == 4) pmPrevBtn.triggerClick();      // ProjectM prev
+    };
+    cb.onVisPresetNext = [this] {
+        // Next preset/scene for the current vis
+        if (currentVisMode == 3) geissSceneBtn.triggerClick();       // Geiss scene
+        else if (currentVisMode == 4) pmNextBtn.triggerClick();      // ProjectM next
+    };
+    cb.onVisParam = [this](int delta) {
+        // Wheel adjusts sensitivity/zoom for the current vis
+        if (currentVisMode == 0) { // Spectrum — sensitivity
+            if (delta > 0) specSensUpBtn.triggerClick();
+            else specSensDownBtn.triggerClick();
+        } else if (currentVisMode == 1) { // Lissajous — zoom
+            if (delta > 0) lissZoomInBtn.triggerClick();
+            else lissZoomOutBtn.triggerClick();
+        } else if (currentVisMode == 2) { // G-Force — ribbons
+            if (delta > 0) gfRibbonUpBtn.triggerClick();
+            else gfRibbonDownBtn.triggerClick();
+        } else if (currentVisMode == 3) { // Geiss — wave scale
+            if (delta > 0) geissWaveUpBtn.triggerClick();
+            else geissWaveDownBtn.triggerClick();
+        } else if (currentVisMode == 4) { // ProjectM — random preset
+            pmRandBtn.triggerClick();
+        }
     };
 
     // Status

@@ -31,7 +31,7 @@ public:
     static constexpr int     NUM_LABELED_BUTTONS  = 8;
 
     // Operating modes
-    enum class Mode { Solo, Companion, Edit, Extras };
+    enum class Mode { Solo, Companion, Edit, Extras, Visuals };
 
     // Callback types — MainComponent wires these up
     struct Callbacks
@@ -81,6 +81,17 @@ public:
         std::function<void()> onUndo;
         std::function<void()> onRedo;
         std::function<void(int delta)> onBpmChange;  // Extras wheel
+
+        // Visuals mode
+        std::function<void()> onVisSpectrum;
+        std::function<void()> onVisLissajous;
+        std::function<void()> onVisGForce;
+        std::function<void()> onVisGeiss;
+        std::function<void()> onVisProjectM;
+        std::function<void()> onVisFullscreen;
+        std::function<void()> onVisPresetPrev;
+        std::function<void()> onVisPresetNext;
+        std::function<void(int delta)> onVisParam;  // Visuals wheel
 
         // Status feedback — called on message thread
         std::function<void(const juce::String& text)> onStatus;
@@ -139,10 +150,12 @@ private:
     void handleCompanionButton(int buttonIndex);
     void handleEditButton(int buttonIndex);
     void handleExtrasButton(int buttonIndex);
+    void handleVisualsButton(int buttonIndex);
     void handleSoloWheel(int direction);
     void handleCompanionWheel(int direction);
     void handleEditWheel(int direction);
     void handleExtrasWheel(int direction);
+    void handleVisualsWheel(int direction);
 
     // Display updates
     void refreshDisplay();
@@ -150,6 +163,7 @@ private:
     void refreshCompanionDisplay();
     void refreshEditDisplay();
     void refreshExtrasDisplay();
+    void refreshVisualsDisplay();
 
     // State
     std::atomic<Mode> currentMode { Mode::Solo };
@@ -162,7 +176,10 @@ private:
 
     // Button state tracking
     bool buttonStates[NUM_BUTTONS] = {};
-    bool shiftHeld = false; // Key 8 held
+    bool shiftHeld = false;          // Key 8 held
+    bool shiftUsed = false;          // Another button was pressed while shift was held
+    juce::int64 button8PressTime = 0; // For long-press detection
+    static constexpr juce::int64 LONG_PRESS_MS = 600;
 
     // Solo mode state
     int selectedParamIndex = 0;

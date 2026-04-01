@@ -62,7 +62,7 @@ bool QuickKeysHandler::openDevice()
         HANDLE h = CreateFileW(detail->DevicePath,
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            nullptr, OPEN_EXISTING, 0, nullptr);
+            nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
 
         if (h == INVALID_HANDLE_VALUE)
             continue;
@@ -181,14 +181,55 @@ void QuickKeysHandler::run()
         DWORD bytesRead = 0;
         memset(buffer, 0, sizeof(buffer));
 
-        BOOL result = ReadFile(h, buffer, INPUT_BUF_SIZE, &bytesRead, nullptr);
+        // Use overlapped I/O so we can wake every 100ms to process pending
+        // display refreshes even when no device input arrives.
+        OVERLAPPED ov = {};
+        ov.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 
-        if (!result || bytesRead == 0)
+        BOOL result = ReadFile(h, buffer, INPUT_BUF_SIZE, &bytesRead, &ov);
+        DWORD err = GetLastError();
+
+        if (!result && err == ERROR_IO_PENDING)
         {
-            DWORD err = GetLastError();
-            logFile.appendText("ReadFile failed: err=" + juce::String((int)err)
-                + " bytesRead=" + juce::String((int)bytesRead) + "\n");
+            // Wait up to 100ms for input or a display-refresh request
+            DWORD waitResult = WaitForSingleObject(ov.hEvent, 100);
 
+            if (waitResult == WAIT_TIMEOUT)
+            {
+                // No device input — just drain pending refresh and loop
+                CancelIo(h);
+                WaitForSingleObject(ov.hEvent, INFINITE);
+                CloseHandle(ov.hEvent);
+                if (pendingDisplayRefresh.exchange(false))
+                    refreshDisplay();
+                continue;
+            }
+
+            if (waitResult != WAIT_OBJECT_0 || !GetOverlappedResult(h, &ov, &bytesRead, FALSE))
+            {
+                err = GetLastError();
+                CloseHandle(ov.hEvent);
+                logFile.appendText("Overlapped read failed: err=" + juce::String((int)err) + "\n");
+                if (err == ERROR_DEVICE_NOT_CONNECTED || err == ERROR_INVALID_HANDLE)
+                {
+                    deviceConnected.store(false);
+                    if (callbacks.onStatus)
+                    {
+                        juce::MessageManager::callAsync([this] {
+                            if (callbacks.onStatus)
+                                callbacks.onStatus("Quick Keys disconnected");
+                        });
+                    }
+                    break;
+                }
+                Thread::sleep(10);
+                continue;
+            }
+        }
+        else if (!result)
+        {
+            CloseHandle(ov.hEvent);
+            logFile.appendText("ReadFile failed immediately: err=" + juce::String((int)err) + "\n");
             if (err == ERROR_DEVICE_NOT_CONNECTED || err == ERROR_INVALID_HANDLE)
             {
                 deviceConnected.store(false);
@@ -204,6 +245,11 @@ void QuickKeysHandler::run()
             Thread::sleep(10);
             continue;
         }
+
+        CloseHandle(ov.hEvent);
+
+        if (bytesRead == 0)
+            continue;
 
         // Log first few input reports for debugging
         {
@@ -244,9 +290,23 @@ void QuickKeysHandler::sendHidReport(const uint8_t* data, int size)
     int copyLen = juce::jmin(size, HID_BUFFER_SIZE);
     memcpy(fullReport, data, static_cast<size_t>(copyLen));
 
+    // Handle is opened with FILE_FLAG_OVERLAPPED, so writes must use overlapped too.
+    OVERLAPPED ov = {};
+    ov.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+
     DWORD bytesWritten = 0;
     BOOL ok = WriteFile(static_cast<HANDLE>(deviceHandle), fullReport,
-                        HID_BUFFER_SIZE, &bytesWritten, nullptr);
+                        HID_BUFFER_SIZE, &bytesWritten, &ov);
+    DWORD err = GetLastError();
+
+    if (!ok && err == ERROR_IO_PENDING)
+    {
+        // Wait up to 2 seconds for the write to complete
+        ok = (WaitForSingleObject(ov.hEvent, 2000) == WAIT_OBJECT_0);
+        GetOverlappedResult(static_cast<HANDLE>(deviceHandle), &ov, &bytesWritten, FALSE);
+    }
+
+    CloseHandle(ov.hEvent);
 
     // Debug log
     juce::String hex;
@@ -254,7 +314,7 @@ void QuickKeysHandler::sendHidReport(const uint8_t* data, int size)
         hex += juce::String::toHexString(fullReport[i]) + " ";
     juce::File("C:/dev/sequencer/qk-debug.log").appendText(
         "SEND [" + juce::String(bytesWritten) + "b] ok=" + juce::String((int)ok)
-        + " err=" + juce::String((int)GetLastError())
+        + " err=" + juce::String((int)err)
         + " : " + hex + "...\n");
 #else
     juce::ignoreUnused(data, size);
@@ -418,19 +478,29 @@ void QuickKeysHandler::processInputReport(const uint8_t* data, int size)
 
 void QuickKeysHandler::handleButtonPress(int buttonIndex)
 {
-    // Key 8 = shift modifier
+    // Key 8 = shift modifier (short hold) OR Visuals bank (long press, no other button used)
     if (buttonIndex == 8)
     {
         shiftHeld = true;
+        shiftUsed = false;
+        button8PressTime = juce::Time::getMillisecondCounter();
         return;
     }
 
-    // Key 9 = mode toggle
+    // Key 9 = mode toggle (cycles Solo/Companion/Edit/Extras — Visuals entered via long-press btn 8)
     if (buttonIndex == 9)
     {
-        toggleMode();
+        // If currently in Visuals, return to Solo
+        if (currentMode.load() == Mode::Visuals)
+            setMode(Mode::Solo);
+        else
+            toggleMode();
         return;
     }
+
+    // Track shift usage so long-press detection works correctly
+    if (shiftHeld)
+        shiftUsed = true;
 
     // Buttons 0-7: mode-specific
     switch (currentMode.load())
@@ -439,13 +509,27 @@ void QuickKeysHandler::handleButtonPress(int buttonIndex)
         case Mode::Companion: handleCompanionButton(buttonIndex); break;
         case Mode::Edit:      handleEditButton(buttonIndex);      break;
         case Mode::Extras:    handleExtrasButton(buttonIndex);    break;
+        case Mode::Visuals:   handleVisualsButton(buttonIndex);   break;
     }
 }
 
 void QuickKeysHandler::handleButtonRelease(int buttonIndex)
 {
     if (buttonIndex == 8)
+    {
+        juce::int64 heldMs = juce::Time::getMillisecondCounter() - button8PressTime;
         shiftHeld = false;
+
+        // Long press with no other buttons used = enter/exit Visuals mode
+        if (!shiftUsed && heldMs >= LONG_PRESS_MS)
+        {
+            if (currentMode.load() == Mode::Visuals)
+                setMode(Mode::Solo);
+            else
+                setMode(Mode::Visuals);
+        }
+        shiftUsed = false;
+    }
 }
 
 void QuickKeysHandler::handleWheel(int direction)
@@ -456,6 +540,7 @@ void QuickKeysHandler::handleWheel(int direction)
         case Mode::Companion: handleCompanionWheel(direction); break;
         case Mode::Edit:      handleEditWheel(direction);      break;
         case Mode::Extras:    handleExtrasWheel(direction);    break;
+        case Mode::Visuals:   handleVisualsWheel(direction);   break;
     }
 }
 
@@ -545,9 +630,7 @@ void QuickKeysHandler::handleCompanionButton(int buttonIndex)
                 if (callbacks.onFxSlotNext)
                     juce::MessageManager::callAsync([this] { callbacks.onFxSlotNext(); });
                 break;
-            case 7: // Shift+7 = prev page (instead of next)
-                if (callbacks.onPagePrev)
-                    juce::MessageManager::callAsync([this] { callbacks.onPagePrev(); });
+            case 7: // Shift+7 = nothing (CAPT has no shift variant)
                 break;
             default:
                 break;
@@ -586,9 +669,9 @@ void QuickKeysHandler::handleCompanionButton(int buttonIndex)
             if (callbacks.onTrackNext)
                 juce::MessageManager::callAsync([this] { callbacks.onTrackNext(); });
             break;
-        case 7: // Next page
-            if (callbacks.onPageNext)
-                juce::MessageManager::callAsync([this] { callbacks.onPageNext(); });
+        case 7: // CAPT
+            if (callbacks.onCapture)
+                juce::MessageManager::callAsync([this] { callbacks.onCapture(); });
             break;
         default:
             break;
@@ -665,7 +748,10 @@ void QuickKeysHandler::handleExtrasButton(int buttonIndex)
         case 1: fire(callbacks.onMidiLearn);   break;
         case 2: fire(callbacks.onToggleKeys);  break;
         case 3: fire(callbacks.onToggleMixer); break;
-        case 4: fire(callbacks.onCapture);     break;
+        case 4: // PG — next page
+            if (callbacks.onPageNext)
+                juce::MessageManager::callAsync([this] { callbacks.onPageNext(); });
+            break;
         case 5: fire(callbacks.onCountIn);     break;
         case 6: fire(callbacks.onUndo);        break;
         case 7: fire(callbacks.onRedo);        break;
@@ -689,7 +775,7 @@ void QuickKeysHandler::refreshExtrasDisplay()
     setKeyText(1, "LEARN");
     setKeyText(2, "KEYS");
     setKeyText(3, "MIX");
-    setKeyText(4, "CAPT");
+    setKeyText(4, "PG");
     setKeyText(5, "CNTIN");
     setKeyText(6, "Undo");
     setKeyText(7, "Redo");
@@ -697,6 +783,47 @@ void QuickKeysHandler::refreshExtrasDisplay()
 }
 
 // ── Mode Switching ──────────────────────────────────────────────────────────
+
+void QuickKeysHandler::handleVisualsButton(int buttonIndex)
+{
+    auto fire = [this](std::function<void()>& cb) {
+        if (cb) juce::MessageManager::callAsync([this, &cb] { if (cb) cb(); });
+    };
+    switch (buttonIndex)
+    {
+        case 0: fire(callbacks.onVisSpectrum);   break;
+        case 1: fire(callbacks.onVisLissajous);  break;
+        case 2: fire(callbacks.onVisGForce);     break;
+        case 3: fire(callbacks.onVisGeiss);      break;
+        case 4: fire(callbacks.onVisProjectM);   break;
+        case 5: fire(callbacks.onVisFullscreen); break;
+        case 6: fire(callbacks.onVisPresetPrev); break;
+        case 7: fire(callbacks.onVisPresetNext); break;
+        default: break;
+    }
+}
+
+void QuickKeysHandler::handleVisualsWheel(int direction)
+{
+    if (callbacks.onVisParam)
+    {
+        int d = direction;
+        juce::MessageManager::callAsync([this, d] { if (callbacks.onVisParam) callbacks.onVisParam(d); });
+    }
+}
+
+void QuickKeysHandler::refreshVisualsDisplay()
+{
+    setKeyText(0, "SPEC");
+    setKeyText(1, "LISS");
+    setKeyText(2, "GFRC");
+    setKeyText(3, "GEIS");
+    setKeyText(4, "PRJM");
+    setKeyText(5, "FULL");
+    setKeyText(6, "Prev");
+    setKeyText(7, "Next");
+    setWheelColor(0, 220, 220);  // Cyan for visuals mode
+}
 
 void QuickKeysHandler::setMode(Mode m)
 {
@@ -722,6 +849,7 @@ void QuickKeysHandler::toggleMode()
         case Mode::Companion: setMode(Mode::Edit);      break;
         case Mode::Edit:      setMode(Mode::Extras);    break;
         case Mode::Extras:    setMode(Mode::Solo);      break;
+        case Mode::Visuals:   setMode(Mode::Solo);      break; // btn9 exits Visuals to Solo
     }
 }
 
@@ -737,6 +865,7 @@ void QuickKeysHandler::refreshDisplay()
         case Mode::Companion: refreshCompanionDisplay(); break;
         case Mode::Edit:      refreshEditDisplay();      break;
         case Mode::Extras:    refreshExtrasDisplay();    break;
+        case Mode::Visuals:   refreshVisualsDisplay();   break;
     }
 }
 
@@ -744,15 +873,19 @@ void QuickKeysHandler::refreshSoloDisplay()
 {
     for (int i = 0; i < NUM_LABELED_BUTTONS; ++i)
     {
-        juce::String label;
+        juce::String name;
         if (i < currentParamNames.size())
-            label = currentParamNames[i];
+            name = currentParamNames[i];
         else
-            label = "P" + juce::String(i + 1);
+            name = "P" + juce::String(i + 1);
 
-        // Bracket the selected param
+        // Show value % for every param; bracket the selected one
+        int pct = juce::roundToInt(paramValues[i] * 100.0f);
+        juce::String label;
         if (i == selectedParamIndex)
-            label = "[" + label.substring(0, 6) + "]";
+            label = "[" + name.substring(0, 4) + "] " + juce::String(pct) + "%";
+        else
+            label = name.substring(0, 5) + " " + juce::String(pct) + "%";
 
         setKeyText(i, label);
     }
@@ -775,7 +908,7 @@ void QuickKeysHandler::refreshCompanionDisplay()
     setKeyText(4, "METRO");
     setKeyText(5, "<<TRK");
     setKeyText(6, "TRK>>");
-    setKeyText(7, "PG");  // Will be updated by setPageLabel()
+    setKeyText(7, "CAPT");
 
     // Green wheel in transport mode
     setWheelColor(30, 255, 30);
@@ -795,6 +928,8 @@ void QuickKeysHandler::setParamValues(const juce::Array<float>& values)
 {
     for (int i = 0; i < 8 && i < values.size(); ++i)
         paramValues[i] = juce::jlimit(0.0f, 1.0f, values[i]);
+    if (currentMode.load() == Mode::Solo && deviceConnected.load())
+        pendingDisplayRefresh.store(true);
 }
 
 void QuickKeysHandler::showParamValue(const juce::String& text)
