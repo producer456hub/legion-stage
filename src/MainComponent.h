@@ -167,18 +167,6 @@ private:
     juce::TextButton loopButton { "LOOP" };
     juce::TextButton panicButton { "PANIC" };
     double panicAnimEndTime = 0.0;
-    juce::TextButton captureButton { "CAP" };
-
-    // ── MIDI Capture ──
-    struct CapturedMidiEvent {
-        juce::MidiMessage message;
-        juce::int64 timestampMs;
-    };
-    juce::Array<CapturedMidiEvent> captureBuffer;
-    juce::CriticalSection captureLock;
-    static constexpr int CAPTURE_WINDOW_MS = 30000;
-    void performMidiCapture();
-
     // ── Navigation ──
     juce::TextButton zoomInButton { "Zoom +" };
     juce::TextButton zoomOutButton { "Zoom -" };

@@ -237,9 +237,6 @@ MainComponent::MainComponent()
         panicAnimEndTime = juce::Time::getMillisecondCounterHiRes() * 0.001 + 3.0;
     };
 
-    addAndMakeVisible(captureButton);
-    captureButton.onClick = [this] { performMidiCapture(); };
-
     addAndMakeVisible(zoomInButton);
     zoomInButton.onClick = [this] { if (timelineComponent) timelineComponent->zoomIn(); };
 
@@ -1323,15 +1320,7 @@ void MainComponent::handleIncomingMidiMessage(juce::MidiInput* /*source*/, const
 {
     // Always feed note-on/off into the rolling capture buffer
     if (msg.isNoteOnOrOff())
-    {
-        juce::int64 now = juce::Time::currentTimeMillis();
-        juce::ScopedLock lock(captureLock);
-        captureBuffer.add({ msg, now });
-        // Trim entries older than the capture window
-        juce::int64 cutoff = now - CAPTURE_WINDOW_MS;
-        while (!captureBuffer.isEmpty() && captureBuffer.getFirst().timestampMs < cutoff)
-            captureBuffer.remove(0);
-    }
+        captureBuffer.addMessage(msg, selectedTrackIndex);
 
     // MIDI Learn — capture CC mapping
     if (midiLearnActive && midiLearnTarget != MidiTarget::None && msg.isController())
@@ -3493,100 +3482,4 @@ void MainComponent::setupQuickKeysCallbacks()
     quickKeysHandler.setCallbacks(cb);
 }
 
-// ── MIDI Capture ─────────────────────────────────────────────────────────────
 
-void MainComponent::performMidiCapture()
-{
-    // Snapshot the capture buffer under lock
-    juce::Array<CapturedMidiEvent> snapshot;
-    {
-        juce::ScopedLock lock(captureLock);
-        snapshot = captureBuffer;
-    }
-
-    if (snapshot.isEmpty())
-    {
-        statusLabel.setText("Capture: nothing played yet", juce::dontSendNotification);
-        return;
-    }
-
-    // Find first note-on and last note-off to determine phrase boundaries
-    juce::int64 firstNoteMs = snapshot.getLast().timestampMs; // will scan down
-    juce::int64 lastNoteMs  = snapshot.getFirst().timestampMs;
-
-    for (auto& ev : snapshot)
-    {
-        if (ev.message.isNoteOn())
-            firstNoteMs = juce::jmin(firstNoteMs, ev.timestampMs);
-        lastNoteMs = juce::jmax(lastNoteMs, ev.timestampMs);
-    }
-
-    double bpm        = pluginHost.getEngine().getBpm();
-    double beatsPerMs = bpm / 60000.0;
-
-    // Convert wall-clock span to beats
-    double spanBeats = (lastNoteMs - firstNoteMs) * beatsPerMs;
-
-    // Round up to nearest bar (4 beats)
-    double clipLengthBeats = std::max(4.0, std::ceil(spanBeats / 4.0) * 4.0);
-
-    // Build the clip — timestamps relative to first note
-    auto clip = std::make_unique<MidiClip>();
-    clip->lengthInBeats  = clipLengthBeats;
-    clip->timelinePosition = pluginHost.getEngine().getPositionInBeats();
-
-    for (auto& ev : snapshot)
-    {
-        if (ev.timestampMs < firstNoteMs) continue;
-        double beatOffset = (ev.timestampMs - firstNoteMs) * beatsPerMs;
-        if (beatOffset > clipLengthBeats) continue;
-
-        juce::MidiMessage m = ev.message;
-        m.setTimeStamp(beatOffset);
-        clip->events.addEvent(m);
-    }
-    clip->events.sort();
-    clip->events.updateMatchedPairs();
-
-    // Find the first empty slot in the selected track
-    auto& track = pluginHost.getTrack(selectedTrackIndex);
-    if (!track.clipPlayer)
-    {
-        statusLabel.setText("Capture: no clip player on selected track", juce::dontSendNotification);
-        return;
-    }
-
-    int targetSlot = -1;
-    for (int i = 0; i < ClipPlayerNode::NUM_SLOTS; ++i)
-    {
-        if (!track.clipPlayer->getSlot(i).hasContent())
-        {
-            targetSlot = i;
-            break;
-        }
-    }
-
-    if (targetSlot < 0)
-    {
-        statusLabel.setText("Capture: no empty slot on track — clear one first", juce::dontSendNotification);
-        return;
-    }
-
-    auto& slot = track.clipPlayer->getSlot(targetSlot);
-    slot.clip  = std::move(clip);
-    slot.state.store(ClipSlot::Stopped);
-
-    // Clear the capture buffer so the next press doesn't re-capture the same notes
-    {
-        juce::ScopedLock lock(captureLock);
-        captureBuffer.clear();
-    }
-
-    int numEvents = slot.clip->events.getNumEvents();
-    statusLabel.setText("Captured " + juce::String(numEvents / 2) + " notes → Track "
-        + juce::String(selectedTrackIndex + 1) + " Slot " + juce::String(targetSlot + 1),
-        juce::dontSendNotification);
-
-    if (timelineComponent) timelineComponent->repaint();
-    updateTrackDisplay();
-}
