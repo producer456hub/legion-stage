@@ -173,6 +173,7 @@ private:
 
     void* deviceHandle = nullptr;      // HANDLE for writes (sendHidReport)
     void* deviceHandleRead = nullptr;  // HANDLE for reads (run() thread only)
+    int   reportSize = HID_BUFFER_SIZE; // actual output report size (32 wireless, 64 wired)
 
     // Button state tracking
     bool buttonStates[NUM_BUTTONS] = {};
@@ -195,6 +196,7 @@ private:
 
     // Device ID bytes (from protocol)
     uint8_t deviceId[6] = { 0xEB, 0x4F, 0x49, 0xBD, 0xD7, 0xFA };
+    bool    isWireless  = false;
 
     Callbacks callbacks;
 

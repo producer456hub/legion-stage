@@ -24,11 +24,68 @@ QuickKeysHandler::~QuickKeysHandler()
 
 // ── Device Connection ───────────────────────────────────────────────────────
 
+// Try to read the per-device hardware ID from the Xencelabs config.xml.
+// The config stores it as the XML tag <M{12 hex chars}>, e.g. <M0798634da8ed>.
+// Returns true and fills outId[6] if found.
+static bool readXencelabsDeviceId(uint8_t outId[6])
+{
+    // %APPDATA% already points to AppData\Roaming on Windows
+    juce::File cfg(juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("Xencelabs/config.xml"));
+
+    if (!cfg.existsAsFile())
+        return false;
+
+    juce::String xml = cfg.loadFileAsString();
+
+    // Find first occurrence of <M followed by 12 hex chars>
+    int pos = 0;
+    while ((pos = xml.indexOf(pos, "<M")) >= 0)
+    {
+        juce::String candidate = xml.substring(pos + 2, pos + 14); // 12 hex chars
+        if (candidate.length() == 12 &&
+            candidate.containsOnly("0123456789abcdefABCDEF"))
+        {
+            for (int i = 0; i < 6; ++i)
+                outId[i] = static_cast<uint8_t>(candidate.substring(i * 2, i * 2 + 2).getHexValue32());
+            return true;
+        }
+        ++pos;
+    }
+    return false;
+}
+
 bool QuickKeysHandler::openDevice()
 {
 #ifdef _WIN32
     juce::File logFile("C:/dev/sequencer/qk-debug.log");
     logFile.replaceWithText("QuickKeys openDevice() starting\n");
+
+    // Kill the Xencelabs UI so it stops fighting us for the display.
+    // XencelabsService.exe (elevated) maintains the wireless link — we only
+    // need to stop the user-space display manager.
+    {
+        STARTUPINFOW si = {};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = {};
+        // CreateProcessW may modify lpCommandLine — must be a mutable buffer
+        wchar_t cmd[] = L"cmd.exe /c taskkill /F /IM Xencelabs.exe";
+        if (CreateProcessW(nullptr, cmd, nullptr, nullptr, FALSE,
+                           CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+        {
+            WaitForSingleObject(pi.hProcess, 2000);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            logFile.appendText("Xencelabs.exe terminated\n");
+            juce::Thread::sleep(500);
+        }
+        else
+        {
+            logFile.appendText("taskkill failed: err=" + juce::String((int)GetLastError()) + "\n");
+        }
+    }
 
     GUID hidGuid;
     HidD_GetHidGuid(&hidGuid);
@@ -91,13 +148,31 @@ bool QuickKeysHandler::openDevice()
                             + " FeatureLen=" + juce::String(caps.FeatureReportByteLength)
                             + "\n");
 
-                        // We need the interface with output report length >= 32
-                        if (caps.OutputReportByteLength >= HID_BUFFER_SIZE)
+                        // Accept wired (64) or wireless dongle (32)
+                        if (caps.OutputReportByteLength >= 32)
                         {
                             HidD_FreePreparsedData(preparsed);
 
                             deviceHandle     = h;
-                            deviceHandleRead = h;  // same handle — writes only from HID thread
+                            deviceHandleRead = h;
+                            reportSize       = caps.OutputReportByteLength;
+                            isWireless = (attrs.ProductID == PRODUCT_ID_WIRELESS);
+
+                            // Read per-unit hardware ID from Xencelabs config.
+                            // Each device has a unique ID embedded in the protocol —
+                            // commands with the wrong ID are silently ignored.
+                            uint8_t cfgId[6] = {};
+                            if (readXencelabsDeviceId(cfgId))
+                            {
+                                memcpy(deviceId, cfgId, 6);
+                                logFile.appendText("Device ID from config: "
+                                    + juce::String::toHexString(cfgId, 6) + "\n");
+                            }
+                            else
+                            {
+                                logFile.appendText("Config not found — using hardcoded device ID\n");
+                            }
+
                             deviceConnected.store(true);
 
                             logFile.appendText("SELECTED interface #" + juce::String(xencelabsCount) + " — sending subscribe\n");
@@ -168,6 +243,8 @@ void QuickKeysHandler::run()
     juce::File logFile("C:/dev/sequencer/qk-debug.log");
     logFile.appendText("Read thread started\n");
 
+    int resubscribeTick = 0; // re-assert our display ownership every ~2s
+
     while (!threadShouldExit())
     {
 #ifdef _WIN32
@@ -196,12 +273,21 @@ void QuickKeysHandler::run()
 
             if (waitResult == WAIT_TIMEOUT)
             {
-                // No device input — just drain pending refresh and loop
                 CancelIo(h);
                 WaitForSingleObject(ov.hEvent, INFINITE);
                 CloseHandle(ov.hEvent);
+
                 if (pendingDisplayRefresh.exchange(false))
                     refreshDisplay();
+
+                // Re-subscribe and refresh every ~2s to reclaim display from
+                // any competing software (e.g. Xencelabs driver)
+                if (++resubscribeTick >= 20)
+                {
+                    resubscribeTick = 0;
+                    subscribeToEvents();
+                    refreshDisplay();
+                }
                 continue;
             }
 
@@ -285,23 +371,21 @@ void QuickKeysHandler::sendHidReport(const uint8_t* data, int size)
     if (deviceHandle == nullptr || deviceHandle == INVALID_HANDLE_VALUE)
         return;
 
-    // Ensure we always send a full 64-byte report
+    // Send using the actual report size for this device (32 wireless, 64 wired)
     uint8_t fullReport[HID_BUFFER_SIZE] = {};
-    int copyLen = juce::jmin(size, HID_BUFFER_SIZE);
+    int copyLen = juce::jmin(size, reportSize);
     memcpy(fullReport, data, static_cast<size_t>(copyLen));
 
-    // Handle is opened with FILE_FLAG_OVERLAPPED, so writes must use overlapped too.
     OVERLAPPED ov = {};
     ov.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 
     DWORD bytesWritten = 0;
     BOOL ok = WriteFile(static_cast<HANDLE>(deviceHandle), fullReport,
-                        HID_BUFFER_SIZE, &bytesWritten, &ov);
+                        static_cast<DWORD>(reportSize), &bytesWritten, &ov);
     DWORD err = GetLastError();
 
     if (!ok && err == ERROR_IO_PENDING)
     {
-        // Wait up to 2 seconds for the write to complete
         ok = (WaitForSingleObject(ov.hEvent, 2000) == WAIT_OBJECT_0);
         GetOverlappedResult(static_cast<HANDLE>(deviceHandle), &ov, &bytesWritten, FALSE);
     }
@@ -310,7 +394,7 @@ void QuickKeysHandler::sendHidReport(const uint8_t* data, int size)
 
     // Debug log
     juce::String hex;
-    for (int i = 0; i < juce::jmin(20, HID_BUFFER_SIZE); ++i)
+    for (int i = 0; i < juce::jmin(20, reportSize); ++i)
         hex += juce::String::toHexString(fullReport[i]) + " ";
     juce::File("C:/dev/sequencer/qk-debug.log").appendText(
         "SEND [" + juce::String(bytesWritten) + "b] ok=" + juce::String((int)ok)
