@@ -31,7 +31,7 @@ public:
     static constexpr int     NUM_LABELED_BUTTONS  = 8;
 
     // Operating modes
-    enum class Mode { Solo, Companion };
+    enum class Mode { Solo, Companion, Edit, Extras };
 
     // Callback types — MainComponent wires these up
     struct Callbacks
@@ -55,12 +55,32 @@ public:
         std::function<void()> onPresetNext;
         std::function<void()> onPresetPrev;
 
-        // Playhead scrub (Companion shift+wheel)
+        // Playhead scrub (Companion + Edit wheel)
         std::function<void(int direction)> onScrub;  // -1 = left, +1 = right
 
         // Parameter control (Solo mode)
-        // paramIndex 0-7, normalized 0.0-1.0
         std::function<void(int paramIndex, float value)> onParamChange;
+
+        // Edit mode (clip operations)
+        std::function<void()> onNewClip;
+        std::function<void()> onDeleteClip;
+        std::function<void()> onDuplicateClip;
+        std::function<void()> onSplitClip;
+        std::function<void()> onEditNotes;
+        std::function<void()> onQuantize;
+        std::function<void()> onZoomIn;
+        std::function<void()> onZoomOut;
+
+        // Extras mode (utility)
+        std::function<void()> onPanic;
+        std::function<void()> onMidiLearn;
+        std::function<void()> onToggleKeys;
+        std::function<void()> onToggleMixer;
+        std::function<void()> onCapture;
+        std::function<void()> onCountIn;
+        std::function<void()> onUndo;
+        std::function<void()> onRedo;
+        std::function<void(int delta)> onBpmChange;  // Extras wheel
 
         // Status feedback — called on message thread
         std::function<void(const juce::String& text)> onStatus;
@@ -116,20 +136,28 @@ private:
     // Mode-specific logic
     void handleSoloButton(int buttonIndex);
     void handleCompanionButton(int buttonIndex);
+    void handleEditButton(int buttonIndex);
+    void handleExtrasButton(int buttonIndex);
     void handleSoloWheel(int direction);
     void handleCompanionWheel(int direction);
+    void handleEditWheel(int direction);
+    void handleExtrasWheel(int direction);
 
     // Display updates
     void refreshDisplay();
     void refreshSoloDisplay();
     void refreshCompanionDisplay();
+    void refreshEditDisplay();
+    void refreshExtrasDisplay();
 
     // State
     std::atomic<Mode> currentMode { Mode::Solo };
     std::atomic<bool> deviceConnected { false };
     std::atomic<int> batteryLevel { -1 };
+    std::atomic<bool> pendingDisplayRefresh { false };
 
-    void* deviceHandle = nullptr; // HANDLE (Windows HID)
+    void* deviceHandle = nullptr;      // HANDLE for writes (sendHidReport)
+    void* deviceHandleRead = nullptr;  // HANDLE for reads (run() thread only)
 
     // Button state tracking
     bool buttonStates[NUM_BUTTONS] = {};
@@ -142,6 +170,10 @@ private:
 
     // Wheel sensitivity
     static constexpr float WHEEL_STEP = 1.0f / 64.0f; // ~2% per click
+
+    // Rate-limiting for HID display updates during wheel turns
+    juce::int64 lastWheelColorSentMs = 0;
+    static constexpr juce::int64 WHEEL_COLOR_RATE_MS = 80; // max ~12 updates/sec
 
     // Device ID bytes (from protocol)
     uint8_t deviceId[6] = { 0xEB, 0x4F, 0x49, 0xBD, 0xD7, 0xFA };

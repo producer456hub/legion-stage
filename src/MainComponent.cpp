@@ -743,6 +743,7 @@ MainComponent::MainComponent()
             setupQuickKeysCallbacks();
             if (quickKeysHandler.openDevice())
             {
+                midi2Handler.setPlugin(pluginHost.getTrack(selectedTrackIndex).plugin);
                 syncQuickKeysParams();
             }
             else
@@ -957,6 +958,9 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    if (paramListenerPlugin != nullptr)
+        paramListenerPlugin->removeListener(this);
+
     pluginHost.spectrumDisplay = nullptr;
     pluginHost.gforceDisplay = nullptr;
     pluginHost.geissDisplay = nullptr;
@@ -1107,6 +1111,7 @@ void MainComponent::selectTrack(int index)
     closePluginEditor();
     updateTrackDisplay();
     updateStatusLabel();
+    if (timelineComponent) timelineComponent->repaint();
 
     // Show the currently loaded plugin in the selector, or reset to default
     auto& track = pluginHost.getTrack(selectedTrackIndex);
@@ -1193,6 +1198,16 @@ void MainComponent::updateTrackDisplay()
 
     if (quickKeysEnabled)
         syncQuickKeysParams();
+
+    // Swap AudioProcessorListener to the new plugin
+    if (paramListenerPlugin != track.plugin)
+    {
+        if (paramListenerPlugin != nullptr)
+            paramListenerPlugin->removeListener(this);
+        paramListenerPlugin = track.plugin;
+        if (paramListenerPlugin != nullptr)
+            paramListenerPlugin->addListener(this);
+    }
 }
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -3303,6 +3318,23 @@ void MainComponent::flushMidi2Outgoing()
     midi2Handler.clearOutgoing();
 }
 
+void MainComponent::audioProcessorParameterChanged(juce::AudioProcessor*, int, float)
+{
+    // Called from the audio thread — dispatch to message thread, coalesced
+    if (!paramChangePending.exchange(true))
+    {
+        juce::MessageManager::callAsync([this] {
+            paramChangePending.store(false);
+            updateParamSliders();
+            if (midi2Enabled && midi2Handler.isConnected())
+            {
+                midi2Handler.sendParameterUpdate();
+                flushMidi2Outgoing();
+            }
+        });
+    }
+}
+
 void MainComponent::syncQuickKeysParams()
 {
     if (!quickKeysEnabled || !quickKeysHandler.isDeviceConnected())
@@ -3329,7 +3361,6 @@ void MainComponent::setupQuickKeysCallbacks()
     cb.onPlay = [this] {
         pluginHost.getEngine().play();
         playButton.setToggleState(true, juce::dontSendNotification);
-        quickKeysHandler.setTransportState(true, pluginHost.getEngine().isRecording());
     };
 
     cb.onStop = [this] {
@@ -3353,7 +3384,6 @@ void MainComponent::setupQuickKeysCallbacks()
             }
         }
         playButton.setToggleState(false, juce::dontSendNotification);
-        quickKeysHandler.setTransportState(false, false);
         if (timelineComponent) timelineComponent->repaint();
     };
 
@@ -3361,7 +3391,6 @@ void MainComponent::setupQuickKeysCallbacks()
         pluginHost.getEngine().toggleRecord();
         bool rec = pluginHost.getEngine().isRecording();
         recordButton.setToggleState(rec, juce::dontSendNotification);
-        quickKeysHandler.setTransportState(pluginHost.getEngine().isPlaying(), rec);
     };
 
     cb.onLoop = [this] {
@@ -3378,13 +3407,11 @@ void MainComponent::setupQuickKeysCallbacks()
     cb.onTrackPrev = [this] {
         selectTrack(juce::jmax(0, selectedTrackIndex - 1));
         syncQuickKeysParams();
-        quickKeysHandler.showParamValue(pluginHost.getTrack(selectedTrackIndex).name);
     };
 
     cb.onTrackNext = [this] {
         selectTrack(juce::jmin(PluginHost::NUM_TRACKS - 1, selectedTrackIndex + 1));
         syncQuickKeysParams();
-        quickKeysHandler.showParamValue(pluginHost.getTrack(selectedTrackIndex).name);
     };
 
     // FX slot navigation (placeholder)
@@ -3402,8 +3429,6 @@ void MainComponent::setupQuickKeysCallbacks()
         syncQuickKeysParams();
         trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1)
             + "/" + juce::String(midi2Handler.getNumPages()), juce::dontSendNotification);
-        quickKeysHandler.setPageLabel("PG " + juce::String(midi2Handler.getCurrentPage() + 1)
-            + "/" + juce::String(midi2Handler.getNumPages()));
         updateParamSliders();
     };
 
@@ -3413,8 +3438,6 @@ void MainComponent::setupQuickKeysCallbacks()
         syncQuickKeysParams();
         trackNameLabel.setText("Page " + juce::String(midi2Handler.getCurrentPage() + 1)
             + "/" + juce::String(midi2Handler.getNumPages()), juce::dontSendNotification);
-        quickKeysHandler.setPageLabel("PG " + juce::String(midi2Handler.getCurrentPage() + 1)
-            + "/" + juce::String(midi2Handler.getNumPages()));
         updateParamSliders();
     };
 
@@ -3426,7 +3449,6 @@ void MainComponent::setupQuickKeysCallbacks()
         {
             juce::String name = trk.plugin->getProgramName(trk.plugin->getCurrentProgram());
             trackNameLabel.setText("Preset: " + name, juce::dontSendNotification);
-            quickKeysHandler.showParamValue(name);
         }
     };
 
@@ -3437,7 +3459,6 @@ void MainComponent::setupQuickKeysCallbacks()
         {
             juce::String name = trk.plugin->getProgramName(trk.plugin->getCurrentProgram());
             trackNameLabel.setText("Preset: " + name, juce::dontSendNotification);
-            quickKeysHandler.showParamValue(name);
         }
     };
 
@@ -3463,6 +3484,7 @@ void MainComponent::setupQuickKeysCallbacks()
                 if (pIdx >= 0 && pIdx < params.size())
                 {
                     params[pIdx]->setValue(value);
+                    updateParamSliders();
 
                     if (midi2Enabled && midi2Handler.isConnected())
                     {
@@ -3472,6 +3494,59 @@ void MainComponent::setupQuickKeysCallbacks()
                 }
             }
         }
+    };
+
+    // ── Edit mode ──
+    cb.onNewClip = [this] {
+        takeSnapshot();
+        if (timelineComponent) timelineComponent->createClipAtPlayhead();
+    };
+    cb.onDeleteClip = [this] {
+        takeSnapshot();
+        if (timelineComponent) timelineComponent->deleteSelected();
+    };
+    cb.onDuplicateClip = [this] {
+        takeSnapshot();
+        if (timelineComponent) timelineComponent->duplicateSelected();
+    };
+    cb.onSplitClip = [this] {
+        takeSnapshot();
+        if (timelineComponent) timelineComponent->splitSelected();
+    };
+    cb.onEditNotes = [this] {
+        if (timelineComponent) editClipButton.onClick();
+    };
+    cb.onQuantize = [this] {
+        takeSnapshot();
+        if (timelineComponent) timelineComponent->quantizeSelectedClip();
+    };
+    cb.onZoomIn  = [this] { if (timelineComponent) timelineComponent->zoomIn(); };
+    cb.onZoomOut = [this] { if (timelineComponent) timelineComponent->zoomOut(); };
+
+    // ── Extras mode ──
+    cb.onPanic = [this] { panicButton.onClick(); };
+    cb.onMidiLearn = [this] {
+        midiLearnButton.setToggleState(!midiLearnButton.getToggleState(), juce::sendNotification);
+    };
+    cb.onToggleKeys = [this] {
+        pianoToggleButton.setToggleState(!pianoToggleButton.getToggleState(), juce::sendNotification);
+    };
+    cb.onToggleMixer = [this] {
+        mixerButton.setToggleState(!mixerButton.getToggleState(), juce::sendNotification);
+    };
+    cb.onCapture = [this] {
+        if (captureBuffer.hasContent()) retrieveCapture();
+    };
+    cb.onCountIn = [this] {
+        pluginHost.getEngine().toggleCountIn();
+        countInButton.setToggleState(pluginHost.getEngine().isCountInEnabled(), juce::dontSendNotification);
+    };
+    cb.onUndo = [this] { undoButton.onClick(); };
+    cb.onRedo = [this] { redoButton.onClick(); };
+    cb.onBpmChange = [this](int delta) {
+        double bpm = juce::jlimit(20.0, 300.0, pluginHost.getEngine().getBpm() + delta);
+        pluginHost.getEngine().setBpm(bpm);
+        bpmLabel.setText(juce::String(static_cast<int>(bpm)) + " BPM", juce::dontSendNotification);
     };
 
     // Status

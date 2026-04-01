@@ -95,7 +95,9 @@ bool QuickKeysHandler::openDevice()
                         if (caps.OutputReportByteLength >= HID_BUFFER_SIZE)
                         {
                             HidD_FreePreparsedData(preparsed);
-                            deviceHandle = h;
+
+                            deviceHandle     = h;
+                            deviceHandleRead = h;  // same handle — writes only from HID thread
                             deviceConnected.store(true);
 
                             logFile.appendText("SELECTED interface #" + juce::String(xencelabsCount) + " — sending subscribe\n");
@@ -144,12 +146,14 @@ void QuickKeysHandler::closeDevice()
 
 #ifdef _WIN32
     if (deviceHandle != nullptr && deviceHandle != INVALID_HANDLE_VALUE)
-    {
         CloseHandle(static_cast<HANDLE>(deviceHandle));
-    }
+
+    // Only close the read handle if it's a separate handle (not the same as write)
+    // deviceHandleRead is always the same as deviceHandle, so don't double-close
 #endif
 
     deviceHandle = nullptr;
+    deviceHandleRead = nullptr;
     deviceConnected.store(false);
 }
 
@@ -167,7 +171,7 @@ void QuickKeysHandler::run()
     while (!threadShouldExit())
     {
 #ifdef _WIN32
-        HANDLE h = static_cast<HANDLE>(deviceHandle);
+        HANDLE h = static_cast<HANDLE>(deviceHandleRead);
         if (h == nullptr || h == INVALID_HANDLE_VALUE)
         {
             Thread::sleep(100);
@@ -215,6 +219,10 @@ void QuickKeysHandler::run()
         }
 
         processInputReport(buffer, static_cast<int>(bytesRead));
+
+        // Drain any pending display refresh requested by the message thread
+        if (pendingDisplayRefresh.exchange(false))
+            refreshDisplay();
 #else
         Thread::sleep(100); // Non-Windows placeholder
 #endif
@@ -425,11 +433,13 @@ void QuickKeysHandler::handleButtonPress(int buttonIndex)
     }
 
     // Buttons 0-7: mode-specific
-    Mode mode = currentMode.load();
-    if (mode == Mode::Solo)
-        handleSoloButton(buttonIndex);
-    else
-        handleCompanionButton(buttonIndex);
+    switch (currentMode.load())
+    {
+        case Mode::Solo:      handleSoloButton(buttonIndex);      break;
+        case Mode::Companion: handleCompanionButton(buttonIndex); break;
+        case Mode::Edit:      handleEditButton(buttonIndex);      break;
+        case Mode::Extras:    handleExtrasButton(buttonIndex);    break;
+    }
 }
 
 void QuickKeysHandler::handleButtonRelease(int buttonIndex)
@@ -440,11 +450,13 @@ void QuickKeysHandler::handleButtonRelease(int buttonIndex)
 
 void QuickKeysHandler::handleWheel(int direction)
 {
-    Mode mode = currentMode.load();
-    if (mode == Mode::Solo)
-        handleSoloWheel(direction);
-    else
-        handleCompanionWheel(direction);
+    switch (currentMode.load())
+    {
+        case Mode::Solo:      handleSoloWheel(direction);      break;
+        case Mode::Companion: handleCompanionWheel(direction); break;
+        case Mode::Edit:      handleEditWheel(direction);      break;
+        case Mode::Extras:    handleExtrasWheel(direction);    break;
+    }
 }
 
 // ── Solo Mode ───────────────────────────────────────────────────────────────
@@ -497,17 +509,22 @@ void QuickKeysHandler::handleSoloWheel(int direction)
             });
         }
 
-        // Show value on overlay
-        juce::String name = (selectedParamIndex < currentParamNames.size())
-            ? currentParamNames[selectedParamIndex] : ("P" + juce::String(selectedParamIndex + 1));
-        juce::String valueText = name + ": " + juce::String(static_cast<int>(val * 100.0f)) + "%";
-        showOverlayText(valueText, 2);
+        // Update the selected button label to show current value — rate-limited
+        juce::int64 now = juce::Time::currentTimeMillis();
+        if (now - lastWheelColorSentMs >= WHEEL_COLOR_RATE_MS)
+        {
+            lastWheelColorSentMs = now;
 
-        // Update wheel LED color based on value (blue→green→red gradient)
-        uint8_t r = static_cast<uint8_t>(juce::jmin(255.0f, val * 2.0f * 255.0f));
-        uint8_t g = static_cast<uint8_t>(juce::jmin(255.0f, (1.0f - std::abs(val - 0.5f) * 2.0f) * 255.0f));
-        uint8_t b = static_cast<uint8_t>(juce::jmin(255.0f, (1.0f - val) * 2.0f * 255.0f));
-        setWheelColor(r, g, b);
+            // Show value in the selected button's label, e.g. "[50%]"
+            juce::String valStr = juce::String(static_cast<int>(val * 100.0f)) + "%";
+            setKeyText(selectedParamIndex, "[" + valStr + "]");
+
+            // Update wheel LED color
+            uint8_t r = static_cast<uint8_t>(juce::jmin(255.0f, val * 2.0f * 255.0f));
+            uint8_t g = static_cast<uint8_t>(juce::jmin(255.0f, (1.0f - std::abs(val - 0.5f) * 2.0f) * 255.0f));
+            uint8_t b = static_cast<uint8_t>(juce::jmin(255.0f, (1.0f - val) * 2.0f * 255.0f));
+            setWheelColor(r, g, b);
+        }
     }
 }
 
@@ -580,25 +597,103 @@ void QuickKeysHandler::handleCompanionButton(int buttonIndex)
 
 void QuickKeysHandler::handleCompanionWheel(int direction)
 {
-    if (shiftHeld)
+    // Normal wheel = scrub playhead
+    if (callbacks.onScrub)
     {
-        // Shift + wheel = scrub playhead
-        if (callbacks.onScrub)
-        {
-            int dir = direction;
-            juce::MessageManager::callAsync([this, dir] {
-                if (callbacks.onScrub)
-                    callbacks.onScrub(dir);
-            });
-        }
-        return;
+        int dir = direction;
+        juce::MessageManager::callAsync([this, dir] {
+            if (callbacks.onScrub)
+                callbacks.onScrub(dir);
+        });
     }
+}
 
-    // Normal wheel = scroll presets
-    if (direction > 0 && callbacks.onPresetNext)
-        juce::MessageManager::callAsync([this] { callbacks.onPresetNext(); });
-    else if (direction < 0 && callbacks.onPresetPrev)
-        juce::MessageManager::callAsync([this] { callbacks.onPresetPrev(); });
+// ── Edit Mode ───────────────────────────────────────────────────────────────
+
+void QuickKeysHandler::handleEditButton(int buttonIndex)
+{
+    auto fire = [this](std::function<void()>& cb) {
+        if (cb) juce::MessageManager::callAsync([this, &cb] { if (cb) cb(); });
+    };
+    switch (buttonIndex)
+    {
+        case 0: fire(callbacks.onNewClip);       break;
+        case 1: fire(callbacks.onDeleteClip);    break;
+        case 2: fire(callbacks.onDuplicateClip); break;
+        case 3: fire(callbacks.onSplitClip);     break;
+        case 4: fire(callbacks.onEditNotes);     break;
+        case 5: fire(callbacks.onQuantize);      break;
+        case 6: fire(callbacks.onZoomIn);        break;
+        case 7: fire(callbacks.onZoomOut);       break;
+        default: break;
+    }
+}
+
+void QuickKeysHandler::handleEditWheel(int direction)
+{
+    // Wheel scrolls the playhead, same as transport mode
+    if (callbacks.onScrub)
+    {
+        int dir = direction;
+        juce::MessageManager::callAsync([this, dir] { if (callbacks.onScrub) callbacks.onScrub(dir); });
+    }
+}
+
+void QuickKeysHandler::refreshEditDisplay()
+{
+    setKeyText(0, "NewClp");
+    setKeyText(1, "Delete");
+    setKeyText(2, "Dupl");
+    setKeyText(3, "Split");
+    setKeyText(4, "EditNt");
+    setKeyText(5, "Quant");
+    setKeyText(6, "Zoom+");
+    setKeyText(7, "Zoom-");
+    setWheelColor(255, 165, 0);  // Orange for edit mode
+}
+
+// ── Extras Mode ─────────────────────────────────────────────────────────────
+
+void QuickKeysHandler::handleExtrasButton(int buttonIndex)
+{
+    auto fire = [this](std::function<void()>& cb) {
+        if (cb) juce::MessageManager::callAsync([this, &cb] { if (cb) cb(); });
+    };
+    switch (buttonIndex)
+    {
+        case 0: fire(callbacks.onPanic);       break;
+        case 1: fire(callbacks.onMidiLearn);   break;
+        case 2: fire(callbacks.onToggleKeys);  break;
+        case 3: fire(callbacks.onToggleMixer); break;
+        case 4: fire(callbacks.onCapture);     break;
+        case 5: fire(callbacks.onCountIn);     break;
+        case 6: fire(callbacks.onUndo);        break;
+        case 7: fire(callbacks.onRedo);        break;
+        default: break;
+    }
+}
+
+void QuickKeysHandler::handleExtrasWheel(int direction)
+{
+    // Wheel adjusts BPM
+    if (callbacks.onBpmChange)
+    {
+        int dir = direction;
+        juce::MessageManager::callAsync([this, dir] { if (callbacks.onBpmChange) callbacks.onBpmChange(dir); });
+    }
+}
+
+void QuickKeysHandler::refreshExtrasDisplay()
+{
+    setKeyText(0, "PANIC");
+    setKeyText(1, "LEARN");
+    setKeyText(2, "KEYS");
+    setKeyText(3, "MIX");
+    setKeyText(4, "CAPT");
+    setKeyText(5, "CNTIN");
+    setKeyText(6, "Undo");
+    setKeyText(7, "Redo");
+    setWheelColor(180, 0, 255);  // Purple for extras mode
 }
 
 // ── Mode Switching ──────────────────────────────────────────────────────────
@@ -609,7 +704,6 @@ void QuickKeysHandler::setMode(Mode m)
     refreshDisplay();
 
     juce::String modeName = (m == Mode::Solo) ? "Solo" : "Companion";
-    showOverlayText(modeName, 2);
 
     if (callbacks.onStatus)
     {
@@ -622,8 +716,13 @@ void QuickKeysHandler::setMode(Mode m)
 
 void QuickKeysHandler::toggleMode()
 {
-    Mode current = currentMode.load();
-    setMode(current == Mode::Solo ? Mode::Companion : Mode::Solo);
+    switch (currentMode.load())
+    {
+        case Mode::Solo:      setMode(Mode::Companion); break;
+        case Mode::Companion: setMode(Mode::Edit);      break;
+        case Mode::Edit:      setMode(Mode::Extras);    break;
+        case Mode::Extras:    setMode(Mode::Solo);      break;
+    }
 }
 
 // ── Display Updates ─────────────────────────────────────────────────────────
@@ -632,11 +731,13 @@ void QuickKeysHandler::refreshDisplay()
 {
     if (!deviceConnected.load()) return;
 
-    Mode mode = currentMode.load();
-    if (mode == Mode::Solo)
-        refreshSoloDisplay();
-    else
-        refreshCompanionDisplay();
+    switch (currentMode.load())
+    {
+        case Mode::Solo:      refreshSoloDisplay();      break;
+        case Mode::Companion: refreshCompanionDisplay(); break;
+        case Mode::Edit:      refreshEditDisplay();      break;
+        case Mode::Extras:    refreshExtrasDisplay();    break;
+    }
 }
 
 void QuickKeysHandler::refreshSoloDisplay()
@@ -676,8 +777,8 @@ void QuickKeysHandler::refreshCompanionDisplay()
     setKeyText(6, "TRK>>");
     setKeyText(7, "PG");  // Will be updated by setPageLabel()
 
-    // Default wheel color: blue (stopped)
-    setWheelColor(0, 100, 255);
+    // Green wheel in transport mode
+    setWheelColor(30, 255, 30);
 }
 
 // ── Public API for DAW Integration ──────────────────────────────────────────
@@ -686,8 +787,9 @@ void QuickKeysHandler::setParamNames(const juce::StringArray& names, int selecte
 {
     currentParamNames = names;
     selectedParamIndex = juce::jlimit(0, 7, selectedIndex);
+    // Flag a refresh — the HID thread will pick it up on its next loop iteration
     if (currentMode.load() == Mode::Solo && deviceConnected.load())
-        refreshSoloDisplay();
+        pendingDisplayRefresh.store(true);
 }
 
 void QuickKeysHandler::showParamValue(const juce::String& text)

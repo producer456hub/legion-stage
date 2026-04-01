@@ -79,7 +79,8 @@ private:
     juce::String fontName { "Consolas" };
 };
 
-class MainComponent : public juce::Component, public juce::Timer, public juce::MidiInputCallback
+class MainComponent : public juce::Component, public juce::Timer,
+                      public juce::MidiInputCallback, public juce::AudioProcessorListener
 {
 public:
     MainComponent();
@@ -248,6 +249,12 @@ private:
 
     // MidiInputCallback — intercept SysEx for CI before it goes to collector
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& msg) override;
+
+    // AudioProcessorListener — bidirectional param sync to Keystage
+    void audioProcessorParameterChanged(juce::AudioProcessor*, int, float) override;
+    void audioProcessorChanged(juce::AudioProcessor*, const ChangeDetails&) override {}
+    juce::AudioProcessor* paramListenerPlugin = nullptr;
+    std::atomic<bool> paramChangePending { false };
 
     // ── FX Inserts ──
     static constexpr int NUM_FX_SLOTS = 2;
