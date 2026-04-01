@@ -743,7 +743,6 @@ MainComponent::MainComponent()
             setupQuickKeysCallbacks();
             if (quickKeysHandler.openDevice())
             {
-                midi2Handler.setPlugin(pluginHost.getTrack(selectedTrackIndex).plugin);
                 syncQuickKeysParams();
             }
             else
@@ -870,7 +869,7 @@ MainComponent::MainComponent()
     // Plugin parameter sliders
     for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
     {
-        auto* slider = new juce::Slider();
+        auto* slider = new LongPressSlider();
         slider->setRange(0.0, 1.0, 0.001);
         slider->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         slider->setTextBoxStyle(juce::Slider::TextBoxBelow, true, 60, 14);
@@ -878,6 +877,7 @@ MainComponent::MainComponent()
         slider->setEnabled(false);
 
         int paramIdx = i;
+        slider->onLongPress = [this, paramIdx] { showParamAssignPopup(paramIdx); };
         slider->onValueChange = [this, slider, paramIdx] {
             if (midiLearnActive) {
                 startMidiLearn(static_cast<MidiTarget>(static_cast<int>(MidiTarget::Param0) + paramIdx));
@@ -1192,9 +1192,8 @@ void MainComponent::updateTrackDisplay()
 
     updateParamSliders();
 
-    // Update MIDI 2.0 handler — also needed by Quick Keys Solo mode for param mappings
-    if (midi2Enabled || quickKeysEnabled)
-        midi2Handler.setPlugin(track.plugin);
+    // Always build mappings — needed for param sliders even without M2/QK connected
+    midi2Handler.setPlugin(track.plugin);
 
     if (quickKeysEnabled)
         syncQuickKeysParams();
@@ -1664,6 +1663,54 @@ void MainComponent::updateStatusLabel()
 
 // ── Plugin Parameters ─────────────────────────────────────────────────────────
 
+void MainComponent::showParamAssignPopup(int slotIndex)
+{
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+    if (track.plugin == nullptr)
+    {
+        statusLabel.setText("Load a plugin first", juce::dontSendNotification);
+        return;
+    }
+
+    auto& params = track.plugin->getParameters();
+    if (params.isEmpty()) return;
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader("Assign knob " + juce::String(slotIndex + 1));
+    menu.addItem(1, "Auto-assign (default)", true,
+                 midi2Handler.getMappings().size() > slotIndex
+                 && midi2Handler.getMappings()[slotIndex].pluginParamIndex ==
+                    track.plugin->getParameters()[
+                        juce::jlimit(0, params.size()-1,
+                                     midi2Handler.getCurrentPage() * 8 + slotIndex)]
+                        ->getParameterIndex());
+    menu.addSeparator();
+
+    for (int i = 0; i < params.size(); ++i)
+    {
+        // Mark currently assigned param
+        bool isCurrent = (midi2Handler.getMappings().size() > slotIndex &&
+                          midi2Handler.getMappings()[slotIndex].pluginParamIndex == i);
+        menu.addItem(i + 2, params[i]->getName(50), true, isCurrent);
+    }
+
+    menu.showMenuAsync(juce::PopupMenu::Options()
+        .withTargetComponent(paramSliders[slotIndex])
+        .withMaximumNumColumns(1),
+        [this, slotIndex, &params = track.plugin->getParameters()](int result) {
+            if (result == 1)
+            {
+                midi2Handler.clearCustomMapping(slotIndex);
+            }
+            else if (result >= 2)
+            {
+                midi2Handler.setCustomMapping(slotIndex, result - 2);
+            }
+            syncQuickKeysParams();
+            updateParamSliders();
+        });
+}
+
 void MainComponent::updateParamSliders()
 {
     auto& track = pluginHost.getTrack(selectedTrackIndex);
@@ -1679,117 +1726,29 @@ void MainComponent::updateParamSliders()
         return;
     }
 
+    // Use midi2Handler mappings as single source of truth — same as device display
     auto& allParams = track.plugin->getParameters();
-    juce::String pluginName = track.plugin->getName().toLowerCase();
-
-    juce::Array<juce::AudioProcessorParameter*> selectedParams;
-
-    // ── Plugin-specific parameter mappings ──
-
-    // u-he Diva: filter, oscillators, envelope
-    if (pluginName.contains("diva"))
-    {
-        juce::StringArray wanted = { "cutoff", "resonance", "hpf", "vco mix",
-                                      "env2 att", "env2 dec" };
-        for (auto& w : wanted)
-        {
-            for (auto* param : allParams)
-            {
-                if (param->getName(30).toLowerCase().contains(w))
-                { selectedParams.add(param); break; }
-            }
-            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
-        }
-    }
-    // u-he Hive: macros then filter
-    else if (pluginName.contains("hive"))
-    {
-        juce::StringArray wanted = { "macro 1", "macro 2", "macro 3", "macro 4",
-                                      "cutoff", "resonance" };
-        for (auto& w : wanted)
-        {
-            for (auto* param : allParams)
-            {
-                if (param->getName(30).toLowerCase().contains(w))
-                { selectedParams.add(param); break; }
-            }
-            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
-        }
-    }
-    // Arturia Pigments: macros
-    else if (pluginName.contains("pigments"))
-    {
-        juce::StringArray wanted = { "macro 1", "macro 2", "macro 3",
-                                      "macro 4", "macro 5", "macro 6" };
-        for (auto& w : wanted)
-        {
-            for (auto* param : allParams)
-            {
-                if (param->getName(30).toLowerCase().contains(w))
-                { selectedParams.add(param); break; }
-            }
-            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
-        }
-    }
-    // Arturia Analog Lab / any Arturia — look for macros first
-    else if (pluginName.contains("analog lab") || pluginName.contains("arturia") ||
-             pluginName.contains("jun-6") || pluginName.contains("jup-8") ||
-             pluginName.contains("mini v") || pluginName.contains("cs-80"))
-    {
-        for (auto* param : allParams)
-        {
-            juce::String name = param->getName(30).toLowerCase();
-            if (name.contains("macro") || name.contains("mcr") || name.contains("assign"))
-                selectedParams.add(param);
-            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
-        }
-    }
-
-    // Generic: try macros, then common synth params
-    if (selectedParams.isEmpty())
-    {
-        for (auto* param : allParams)
-        {
-            juce::String name = param->getName(30).toLowerCase();
-            if (name.contains("macro") || name.contains("mcr") || name.contains("assign"))
-                selectedParams.add(param);
-            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
-        }
-    }
-
-    if (selectedParams.isEmpty())
-    {
-        juce::StringArray commonNames = { "cutoff", "filter", "resonance",
-                                           "attack", "release", "drive", "mix", "volume" };
-        for (auto& cn : commonNames)
-        {
-            for (auto* param : allParams)
-            {
-                if (param->getName(30).toLowerCase().contains(cn))
-                { selectedParams.add(param); break; }
-            }
-            if (selectedParams.size() >= NUM_PARAM_SLIDERS) break;
-        }
-    }
-
-    // Fallback: first N parameters
-    if (selectedParams.isEmpty())
-    {
-        for (int i = 0; i < juce::jmin(NUM_PARAM_SLIDERS, allParams.size()); ++i)
-            selectedParams.add(allParams[i]);
-    }
+    auto& mappings  = midi2Handler.getMappings();
 
     for (int i = 0; i < NUM_PARAM_SLIDERS; ++i)
     {
-        if (i < selectedParams.size())
+        if (i < mappings.size())
         {
-            auto* param = selectedParams[i];
-            paramSliders[i]->setEnabled(true);
-            paramSliders[i]->setValue(param->getValue(), juce::dontSendNotification);
-            paramLabels[i]->setText(param->getName(12), juce::dontSendNotification);
-
-            // Store the actual parameter index for the slider callback
-            paramSliders[i]->getProperties().set("paramIndex", allParams.indexOf(param));
+            int pIdx = mappings[i].pluginParamIndex;
+            if (pIdx >= 0 && pIdx < allParams.size())
+            {
+                paramSliders[i]->setEnabled(true);
+                paramSliders[i]->setValue(allParams[pIdx]->getValue(), juce::dontSendNotification);
+                paramLabels[i]->setText(mappings[i].name, juce::dontSendNotification);
+                paramSliders[i]->getProperties().set("paramIndex", pIdx);
+            }
+            else
+            {
+                paramSliders[i]->setEnabled(false);
+                paramSliders[i]->setValue(0.0, juce::dontSendNotification);
+                paramLabels[i]->setText("", juce::dontSendNotification);
+                paramSliders[i]->getProperties().set("paramIndex", -1);
+            }
         }
         else
         {
@@ -3326,6 +3285,8 @@ void MainComponent::audioProcessorParameterChanged(juce::AudioProcessor*, int, f
         juce::MessageManager::callAsync([this] {
             paramChangePending.store(false);
             updateParamSliders();
+            if (quickKeysEnabled)
+                syncQuickKeysParams();  // keep wheel positions in sync with plugin state
             if (midi2Enabled && midi2Handler.isConnected())
             {
                 midi2Handler.sendParameterUpdate();
@@ -3344,11 +3305,22 @@ void MainComponent::syncQuickKeysParams()
         return;
 
     auto& mappings = midi2Handler.getMappings();
+    auto& track = pluginHost.getTrack(selectedTrackIndex);
+
     juce::StringArray names;
+    juce::Array<float> values;
     for (auto& m : mappings)
+    {
         names.add(m.name);
+        float val = 0.5f;
+        if (track.plugin && m.pluginParamIndex >= 0
+            && m.pluginParamIndex < track.plugin->getParameters().size())
+            val = track.plugin->getParameters()[m.pluginParamIndex]->getValue();
+        values.add(val);
+    }
 
     quickKeysHandler.setParamNames(names, 0);
+    quickKeysHandler.setParamValues(values);
     quickKeysHandler.setPageLabel("PG " + juce::String(midi2Handler.getCurrentPage() + 1)
         + "/" + juce::String(midi2Handler.getNumPages()));
 }

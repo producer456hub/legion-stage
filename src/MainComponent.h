@@ -307,9 +307,38 @@ private:
 
     // ── Plugin Parameters ──
     static constexpr int NUM_PARAM_SLIDERS = 6;
-    juce::OwnedArray<juce::Slider> paramSliders;
+
+    // Slider subclass that fires onLongPress after 600ms hold
+    class LongPressSlider : public juce::Slider, private juce::Timer
+    {
+    public:
+        std::function<void()> onLongPress;
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            startTimer(600);
+            juce::Slider::mouseDown(e);
+        }
+        void mouseUp(const juce::MouseEvent& e) override
+        {
+            stopTimer();
+            juce::Slider::mouseUp(e);
+        }
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            stopTimer();
+            juce::Slider::mouseDrag(e);
+        }
+        void timerCallback() override
+        {
+            stopTimer();
+            if (onLongPress) onLongPress();
+        }
+    };
+
+    juce::OwnedArray<LongPressSlider> paramSliders;
     juce::OwnedArray<juce::Label> paramLabels;
     void updateParamSliders();
+    void showParamAssignPopup(int slotIndex);
 
     // ── Right Panel — Mix + Info ──
     juce::Slider volumeSlider;

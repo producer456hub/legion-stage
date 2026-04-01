@@ -69,10 +69,17 @@ public:
     // Preset navigation
     void nextPreset();
     void prevPreset();
+
+    // Custom slot assignments — pin a specific plugin param to a knob slot (-1 = auto)
+    void setCustomMapping(int slotIndex, int pluginParamIndex);
+    void clearCustomMapping(int slotIndex);
+    void clearAllCustomMappings();
+
 private:
 
     // Parameter mappings (up to 8 knobs → CCs 24-31)
     juce::Array<ParamMapping> mappings;
+    int customMappings[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
     void buildMappings();
 
     // CI message builders

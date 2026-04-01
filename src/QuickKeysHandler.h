@@ -103,8 +103,9 @@ public:
     void setCallbacks(const Callbacks& cb) { callbacks = cb; }
 
     // Update display from the DAW side
-    // Solo mode: param names from plugin mappings
+    // Solo mode: param names + current values from plugin mappings
     void setParamNames(const juce::StringArray& names, int selectedIndex);
+    void setParamValues(const juce::Array<float>& values);  // sync wheel positions to plugin state
     // Solo mode: update overlay with current value text
     void showParamValue(const juce::String& text);
     // Companion mode: update page label on button 7

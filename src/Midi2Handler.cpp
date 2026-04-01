@@ -12,8 +12,34 @@ Midi2Handler::Midi2Handler()
 
 void Midi2Handler::setPlugin(juce::AudioProcessor* plugin)
 {
+    if (currentPlugin != plugin)
+        clearAllCustomMappings();  // fresh plugin = fresh assignments
     currentPlugin = plugin;
     buildMappings();
+}
+
+void Midi2Handler::setCustomMapping(int slotIndex, int pluginParamIndex)
+{
+    if (slotIndex >= 0 && slotIndex < 8)
+    {
+        customMappings[slotIndex] = pluginParamIndex;
+        buildMappings();
+    }
+}
+
+void Midi2Handler::clearCustomMapping(int slotIndex)
+{
+    if (slotIndex >= 0 && slotIndex < 8)
+    {
+        customMappings[slotIndex] = -1;
+        buildMappings();
+    }
+}
+
+void Midi2Handler::clearAllCustomMappings()
+{
+    for (int i = 0; i < 8; ++i)
+        customMappings[i] = -1;
 }
 
 void Midi2Handler::buildMappings()
@@ -58,6 +84,17 @@ void Midi2Handler::buildMappings()
         m.cc = i;
         m.name = params[startParam + i]->getName(16);
         mappings.add(m);
+    }
+
+    // Apply custom slot overrides
+    for (int slot = 0; slot < 8 && slot < mappings.size(); ++slot)
+    {
+        int custom = customMappings[slot];
+        if (custom >= 0 && custom < params.size())
+        {
+            mappings.getReference(slot).pluginParamIndex = custom;
+            mappings.getReference(slot).name = params[custom]->getName(16);
+        }
     }
 }
 

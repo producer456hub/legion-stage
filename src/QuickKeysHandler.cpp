@@ -787,9 +787,14 @@ void QuickKeysHandler::setParamNames(const juce::StringArray& names, int selecte
 {
     currentParamNames = names;
     selectedParamIndex = juce::jlimit(0, 7, selectedIndex);
-    // Flag a refresh — the HID thread will pick it up on its next loop iteration
     if (currentMode.load() == Mode::Solo && deviceConnected.load())
         pendingDisplayRefresh.store(true);
+}
+
+void QuickKeysHandler::setParamValues(const juce::Array<float>& values)
+{
+    for (int i = 0; i < 8 && i < values.size(); ++i)
+        paramValues[i] = juce::jlimit(0.0f, 1.0f, values[i]);
 }
 
 void QuickKeysHandler::showParamValue(const juce::String& text)
