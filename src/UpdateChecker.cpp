@@ -33,7 +33,7 @@ void UpdateChecker::run()
     if (currentMode == Mode::Check)
     {
         postStatus("Fetching latest changes...");
-        if (!runProcess("cmd.exe /c \"cd /d " + repoPath + " && git fetch origin main 2>&1\"", output))
+        if (!runProcess("cmd.exe /c \"cd /d " + repoPath + " && git fetch origin quickprozoom 2>&1\"", output))
         {
             postCompletion(false, "Failed to fetch: " + output);
             return;
@@ -41,7 +41,7 @@ void UpdateChecker::run()
 
         juce::String localHash, remoteHash;
         if (!runProcess("cmd.exe /c \"cd /d " + repoPath + " && git rev-parse HEAD\"", localHash) ||
-            !runProcess("cmd.exe /c \"cd /d " + repoPath + " && git rev-parse origin/main\"", remoteHash))
+            !runProcess("cmd.exe /c \"cd /d " + repoPath + " && git rev-parse origin/quickprozoom\"", remoteHash))
         {
             postCompletion(false, "Failed to compare versions.");
             return;
@@ -57,7 +57,7 @@ void UpdateChecker::run()
         }
 
         juce::String commitLog;
-        runProcess("cmd.exe /c \"cd /d " + repoPath + " && git log --oneline HEAD..origin/main\"", commitLog);
+        runProcess("cmd.exe /c \"cd /d " + repoPath + " && git log --oneline HEAD..origin/quickprozoom\"", commitLog);
 
         if (threadShouldExit()) return;
 
@@ -67,7 +67,7 @@ void UpdateChecker::run()
     else // Mode::Update
     {
         postStatus("Pulling latest changes...");
-        if (!runProcess("cmd.exe /c \"cd /d " + repoPath + " && git pull origin main 2>&1\"", output))
+        if (!runProcess("cmd.exe /c \"cd /d " + repoPath + " && git pull origin quickprozoom 2>&1\"", output))
         {
             postCompletion(false, "Git pull failed:\n" + output);
             return;
