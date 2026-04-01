@@ -6,6 +6,7 @@
 #include "PianoRollComponent.h"
 #include "TimelineComponent.h"
 #include "Midi2Handler.h"
+#include "QuickKeysHandler.h"
 #include "ThemeManager.h"
 #include "SpectrumComponent.h"
 #include "LissajousComponent.h"
@@ -166,6 +167,17 @@ private:
     juce::TextButton loopButton { "LOOP" };
     juce::TextButton panicButton { "PANIC" };
     double panicAnimEndTime = 0.0;
+    juce::TextButton captureButton { "CAP" };
+
+    // ── MIDI Capture ──
+    struct CapturedMidiEvent {
+        juce::MidiMessage message;
+        juce::int64 timestampMs;
+    };
+    juce::Array<CapturedMidiEvent> captureBuffer;
+    juce::CriticalSection captureLock;
+    static constexpr int CAPTURE_WINDOW_MS = 30000;
+    void performMidiCapture();
 
     // ── Navigation ──
     juce::TextButton zoomInButton { "Zoom +" };
@@ -289,6 +301,14 @@ private:
     bool midi2Enabled = false;
     juce::String midiOutputId;
     std::unique_ptr<juce::MidiOutput> midiOutput;  // kept open for CI responses
+
+    // ── Xencelabs Quick Keys ──
+    QuickKeysHandler quickKeysHandler;
+    juce::TextButton quickKeysButton { "QK" };
+    bool quickKeysEnabled = false;
+    void setupQuickKeysCallbacks();
+    void syncQuickKeysParams();
+    void flushMidi2Outgoing();
 
     // ── Plugin Parameters ──
     static constexpr int NUM_PARAM_SLIDERS = 6;
