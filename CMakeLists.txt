@@ -64,6 +64,11 @@ target_sources(Sequencer PRIVATE
     src/GamepadHandler.h
     src/GamepadHandler.cpp
     src/GamepadOverlayComponent.h
+    src/MoveControlEvent.h
+    src/MoveMode.h
+    src/MoveControlBus.h
+    src/MoveControlBus.cpp
+    src/StubNoteMode.h
 )
 
 target_compile_definitions(Sequencer PRIVATE
