@@ -1,3 +1,18 @@
 [submodule "libs/JUCE"]
 	path = libs/JUCE
 	url = https://github.com/juce-framework/JUCE.git
+[submodule "libs/dragonfly-reverb"]
+	path = libs/dragonfly-reverb
+	url = https://github.com/michaelwillis/dragonfly-reverb.git
+[submodule "libs/drumlabooh"]
+	path = libs/drumlabooh
+	url = https://github.com/psemiletov/drumlabooh.git
+[submodule "libs/projectm"]
+	path = libs/projectm
+	url = https://github.com/projectM-visualizer/projectm.git
+[submodule "libs/projectm-presets"]
+	path = libs/projectm-presets
+	url = https://github.com/projectM-visualizer/presets-milkdrop-original.git
+[submodule "libs/surge"]
+	path = libs/surge
+	url = https://github.com/surge-synthesizer/surge.git
